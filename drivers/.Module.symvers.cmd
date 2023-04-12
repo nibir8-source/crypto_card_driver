@@ -1,0 +1,1 @@
+cmd_/home/nibir/Downloads/template/drivers/Module.symvers :=  sed 's/ko$$/o/'  /home/nibir/Downloads/template/drivers/modules.order | scripts/mod/modpost      -o /home/nibir/Downloads/template/drivers/Module.symvers -e -i Module.symvers -T - 

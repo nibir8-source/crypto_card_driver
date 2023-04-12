@@ -1,0 +1,1 @@
+cmd_/home/nibir/Downloads/template/drivers/cryptocard_mod.ko := ld -r  -m elf_x86_64 -z noexecstack   --build-id=sha1  -T scripts/module.lds -o /home/nibir/Downloads/template/drivers/cryptocard_mod.ko /home/nibir/Downloads/template/drivers/cryptocard_mod.o /home/nibir/Downloads/template/drivers/cryptocard_mod.mod.o;  true
