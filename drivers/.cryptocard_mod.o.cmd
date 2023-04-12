@@ -1157,6 +1157,12 @@ deps_/home/nibir/Downloads/template/drivers/cryptocard_mod.o := \
     $(wildcard include/config/DMA_API_DEBUG) \
     $(wildcard include/config/NEED_DMA_MAP_STATE) \
   include/linux/dma-direction.h \
+  include/linux/file.h \
+  include/linux/fs_struct.h \
+  arch/x86/include/asm/tlbflush.h \
+  arch/x86/include/asm/invpcid.h \
+  arch/x86/include/asm/pti.h \
+  /home/nibir/Downloads/template/drivers/cryptocard_mod.h \
 
 /home/nibir/Downloads/template/drivers/cryptocard_mod.o: $(deps_/home/nibir/Downloads/template/drivers/cryptocard_mod.o)
 
