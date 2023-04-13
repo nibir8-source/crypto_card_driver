@@ -36,7 +36,7 @@ Note: Add following line in your .bashrc file in your home directory(Eg: /home/u
 	export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:<path to libcryptor.so library>
 
 Eg:
-	export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/rohit/cs614/PA3/template/lib/
+	export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/sarthak/CS614/CS614/A3/crypto_card_driver/lib
 
 
 ## Prepare Submission Tar File

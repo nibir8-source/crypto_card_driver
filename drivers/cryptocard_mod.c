@@ -111,7 +111,6 @@ long device_ioctl(struct file *file,
 	int ret = 0; // on failure return -1
 	struct key_struct *k_buff = NULL;
     struct data_struct *d_buff = NULL;
-    char *buff_2 = NULL; 
     char *buff = NULL;
     KEY_COMP a, b;
     ADDR_PTR addr;
@@ -151,7 +150,6 @@ long device_ioctl(struct file *file,
             length = d_buff->length;
             isMapped = d_buff->isMapped;
             buff = (char *)vmalloc(length);
-            buff_2 = (char *)vmalloc(length);
             if(copy_from_user(buff,(char *)addr,length)){
                 pr_err("Copying key data from encryption from user failed\n");
                 return -1;
@@ -167,11 +165,11 @@ long device_ioctl(struct file *file,
                 count++;
             };
             for(int i = 0; i<length; i++){
-                buff_2[length-1-i] = readb(drv_priv->hwmem + MMIO_UNUSED_OFFSET + i);
+                buff[length-1-i] = readb(drv_priv->hwmem + MMIO_UNUSED_OFFSET + i);
             }
             printk("Status reg content final: %x %d\n", readl(drv_priv->hwmem + MMIO_STATUS), count);
-            printk("Buffer: %s\n", buff_2);
-            if(copy_to_user(addr, buff_2,length)){
+            printk("Buffer: %s\n", buff);
+            if(copy_to_user(addr, buff,length)){
                 pr_err("Copying key data from encryption to user failed\n");
                 return -1;
             }
@@ -181,23 +179,43 @@ long device_ioctl(struct file *file,
             vfree(buff);
             return ret;
         case IOCTL_DECRYPT:
-            // printk("Start decryption\n");
-            // d_buff = (struct data_struct*)vmalloc(sizeof(struct data_struct)) ;
-            // if(copy_from_user(d_buff,(char*)ioctl_param,sizeof(struct data_struct))){
-            //     pr_err("Copying key data from decryption from user failed\n");
-            //     return -1;
-            // }
-            // addr = d_buff->addr;
-            // length = d_buff->length;
-            // isMapped = d_buff->isMapped;
-            // writel(length, drv_priv->hwmem + MMIO_MSG_LEN);
-            // writel(0x02, drv_priv->hwmem + MMIO_STATUS);
-            // writel((unsigned long)addr, drv_priv->hwmem + MMIO_DATA_ADDR);
-            // // *(drv_priv->hwmem + MMIO_DATA_ADDR) = (unsigned long)addr;
-            // // printk("Status reg content: %x\n", readl(drv_priv->hwmem + MMIO_STATUS));
-            // while(readl(drv_priv->hwmem + MMIO_STATUS) == 0x3);
-            // printk("End decryption");
-            // vfree(d_buff);
+            printk("Start decryption\n");
+            d_buff = (struct data_struct*)vmalloc(sizeof(struct data_struct)) ;
+            if(copy_from_user(d_buff,(char*)ioctl_param,sizeof(struct data_struct))){
+                pr_err("Copying key data from encryption from user failed\n");
+                return -1;
+            }
+            addr = d_buff->addr;
+            length = d_buff->length;
+            isMapped = d_buff->isMapped;
+            buff = (char *)vmalloc(length);
+            if(copy_from_user(buff,(char *)addr,length)){
+                pr_err("Copying key data from decryption from user failed\n");
+                return -1;
+            }
+            writel(length, drv_priv->hwmem + MMIO_MSG_LEN);
+            writel(2, drv_priv->hwmem + MMIO_STATUS);
+            for(int i = 0; i<length; i++){
+                writeb(buff[length-1-i], drv_priv->hwmem + MMIO_UNUSED_OFFSET + i);
+            }
+            writel(MMIO_UNUSED_OFFSET, drv_priv->hwmem + MMIO_DATA_ADDR);
+            printk("Status reg content: %x\n", readl(drv_priv->hwmem + MMIO_STATUS));
+            while(readl(drv_priv->hwmem + MMIO_STATUS) == 3){
+                count++;
+            };
+            for(int i = 0; i<length; i++){
+                buff[length-1-i] = readb(drv_priv->hwmem + MMIO_UNUSED_OFFSET + i);
+            }
+            printk("Status reg content final: %x %d\n", readl(drv_priv->hwmem + MMIO_STATUS), count);
+            printk("Buffer: %s\n", buff);
+            if(copy_to_user(addr, buff,length)){
+                pr_err("Copying key data from encryption to user failed\n");
+                return -1;
+            }
+            printk("End encryption");
+            // print_data(addr, length);
+            vfree(d_buff);
+            vfree(buff);
             return ret;
 	}
 	return ret;
