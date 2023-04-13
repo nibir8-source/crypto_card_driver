@@ -10,13 +10,6 @@
 #include <sys/types.h>
 #include <sys/ioctl.h>
 
-#define MAJOR_NUM 100
-
-
-#define IOCTL_SET_KEY _IOWR(MAJOR_NUM, 0, char*)
-#define IOCTL_ENCRYPT _IOWR(MAJOR_NUM, 1, char*)
-#define IOCTL_DECRYPT _IOWR(MAJOR_NUM, 2, char*)
-
 struct key_struct{
   KEY_COMP a;
   KEY_COMP b;
@@ -26,6 +19,12 @@ struct data_struct{
   ADDR_PTR addr;
   uint64_t length;
   uint8_t isMapped;
+  int is_encrypt;
+};
+
+struct config_struct{
+  config_t type;
+  uint8_t value;
 };
 
 struct key_struct k_struct;
@@ -61,7 +60,8 @@ int encrypt(DEV_HANDLE cdev, ADDR_PTR addr, uint64_t length, uint8_t isMapped)
   d_struct.addr = addr;
   d_struct.length = length;
   d_struct.isMapped = isMapped;
-  if(ioctl(cdev, IOCTL_ENCRYPT, &d_struct) < 0){
+  d_struct.is_encrypt = 1;
+  if(ioctl(cdev, IOCTL_ENC_DEC, &d_struct) < 0){
        return ERROR;
   }
   return 0;
@@ -80,7 +80,8 @@ int decrypt(DEV_HANDLE cdev, ADDR_PTR addr, uint64_t length, uint8_t isMapped)
   d_struct.addr = addr;
   d_struct.length = length;
   d_struct.isMapped = isMapped;
-  if(ioctl(cdev, IOCTL_DECRYPT, &d_struct) < 0){
+  d_struct.is_encrypt = 0;
+  if(ioctl(cdev, IOCTL_ENC_DEC, &d_struct) < 0){
        return ERROR;
   }
   return 0;
@@ -111,7 +112,13 @@ Takes three arguments
 Return 0 in case of key is set successfully*/
 int set_config(DEV_HANDLE cdev, config_t type, uint8_t value)
 {
-  return ERROR;
+  struct config_struct cfg;
+  cfg.type = type;
+  cfg.value = value;
+  if(ioctl(cdev, IOCTL_SET_CONFIG, &cfg) < 0){
+       return ERROR;
+  }
+  return 0;
 }
 
 /*Function template to device input/output memory into user space.

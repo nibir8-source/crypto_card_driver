@@ -16,6 +16,7 @@
 #include <linux/uaccess.h>
 #include <linux/device.h>
 #include <linux/io.h>
+#include <linux/semaphore.h>
 
 #include "cryptocard_mod.h"
 
@@ -28,6 +29,8 @@
 #define MMIO_DATA_ADDR 128
 #define MMIO_UNUSED_OFFSET 168
 #define OFF 8
+#define MMIO_ISR_OFFSET 36
+#define MMIO_ACK_OFFSET 100
 
 #define CRYPTOCARD_VENDOR_ID 0x1234
 #define CRYPTOCARD_DEVICE_ID 0xDEBA
@@ -51,12 +54,23 @@ struct data_struct{
   ADDR_PTR addr;
   uint64_t length;
   uint8_t isMapped;
+  int is_encrypt;
+};
+
+struct config_struct{
+  config_t type;
+  uint8_t value;
 };
 
 /* This is a "private" data structure */
 /* You can store there any data that should be passed between driver's functions */
 struct my_driver_priv {
     void __iomem *hwmem;
+    int is_interrupt;
+    int is_dma;
+    struct semaphore sem;
+    void *dma_buffer;
+    size_t buffer_size;
 };
 
 
@@ -111,14 +125,17 @@ long device_ioctl(struct file *file,
 	int ret = 0; // on failure return -1
 	struct key_struct *k_buff = NULL;
     struct data_struct *d_buff = NULL;
+    struct config_struct *cfg_buff = NULL;
     char *buff = NULL;
     KEY_COMP a, b;
     ADDR_PTR addr;
-    int count = 0;
     uint64_t length;
     uint8_t isMapped;
     struct pci_dev *pdev = pci_get_device(CRYPTOCARD_VENDOR_ID, CRYPTOCARD_DEVICE_ID, NULL);
     struct my_driver_priv *drv_priv = (struct my_driver_priv *) pci_get_drvdata(pdev);
+    int flag;
+    config_t type;
+    uint8_t value;
     // unsigned long long bt, ct, dt;
 	/*
 	 * Switch according to the ioctl called
@@ -139,8 +156,8 @@ long device_ioctl(struct file *file,
             vfree(k_buff);
             printk("Key writing finshed\n");
             return ret;
-        case IOCTL_ENCRYPT:
-            printk("Start encryption\n");
+        case IOCTL_ENC_DEC:
+            printk("Start cryption\n");
             d_buff = (struct data_struct*)vmalloc(sizeof(struct data_struct)) ;
             if(copy_from_user(d_buff,(char*)ioctl_param,sizeof(struct data_struct))){
                 pr_err("Copying key data from encryption from user failed\n");
@@ -151,71 +168,50 @@ long device_ioctl(struct file *file,
             isMapped = d_buff->isMapped;
             buff = (char *)vmalloc(length);
             if(copy_from_user(buff,(char *)addr,length)){
-                pr_err("Copying key data from encryption from user failed\n");
+                pr_err("Copying key data from cryption from user failed\n");
                 return -1;
             }
             writel(length, drv_priv->hwmem + MMIO_MSG_LEN);
-            writel(0, drv_priv->hwmem + MMIO_STATUS);
+            writel((drv_priv->is_interrupt? 128 : 0) | (d_buff->is_encrypt ? 0 : 2), drv_priv->hwmem + MMIO_STATUS);
             for(int i = 0; i<length; i++){
                 writeb(buff[length-1-i], drv_priv->hwmem + MMIO_UNUSED_OFFSET + i);
             }
-            writel(MMIO_UNUSED_OFFSET, drv_priv->hwmem + MMIO_DATA_ADDR);
-            printk("Status reg content: %x\n", readl(drv_priv->hwmem + MMIO_STATUS));
-            while(readl(drv_priv->hwmem + MMIO_STATUS) == 1){
-                count++;
-            };
+            writeq(MMIO_UNUSED_OFFSET, drv_priv->hwmem + MMIO_DATA_ADDR);
+            if(drv_priv->is_interrupt){
+                if(down_interruptible(&drv_priv->sem)){
+                    return -ERESTARTSYS;
+                }
+            }else {
+                flag = 1 | (d_buff->is_encrypt ? 0 : 2);
+                while(readl(drv_priv->hwmem + MMIO_STATUS) == flag);
+            }
             for(int i = 0; i<length; i++){
                 buff[length-1-i] = readb(drv_priv->hwmem + MMIO_UNUSED_OFFSET + i);
             }
-            printk("Status reg content final: %x %d\n", readl(drv_priv->hwmem + MMIO_STATUS), count);
-            printk("Buffer: %s\n", buff);
             if(copy_to_user(addr, buff,length)){
-                pr_err("Copying key data from encryption to user failed\n");
+                pr_err("Copying key data from cryption to user failed\n");
                 return -1;
             }
-            printk("End encryption");
+            printk("End cryption");
             // print_data(addr, length);
             vfree(d_buff);
             vfree(buff);
             return ret;
-        case IOCTL_DECRYPT:
-            printk("Start decryption\n");
-            d_buff = (struct data_struct*)vmalloc(sizeof(struct data_struct)) ;
-            if(copy_from_user(d_buff,(char*)ioctl_param,sizeof(struct data_struct))){
+        case IOCTL_SET_CONFIG:
+            printk("Start config\n");
+            cfg_buff = (struct config_struct*)vmalloc(sizeof(struct config_struct)) ;
+            if(copy_from_user(cfg_buff,(char*)ioctl_param,sizeof(struct config_struct))){
                 pr_err("Copying key data from encryption from user failed\n");
                 return -1;
             }
-            addr = d_buff->addr;
-            length = d_buff->length;
-            isMapped = d_buff->isMapped;
-            buff = (char *)vmalloc(length);
-            if(copy_from_user(buff,(char *)addr,length)){
-                pr_err("Copying key data from decryption from user failed\n");
-                return -1;
+            type = cfg_buff->type;
+            value = cfg_buff->value;
+            if(type == INTERRUPT){
+                drv_priv->is_interrupt = value;
+            }else{
+                drv_priv->is_dma = value;
             }
-            writel(length, drv_priv->hwmem + MMIO_MSG_LEN);
-            writel(2, drv_priv->hwmem + MMIO_STATUS);
-            for(int i = 0; i<length; i++){
-                writeb(buff[length-1-i], drv_priv->hwmem + MMIO_UNUSED_OFFSET + i);
-            }
-            writel(MMIO_UNUSED_OFFSET, drv_priv->hwmem + MMIO_DATA_ADDR);
-            printk("Status reg content: %x\n", readl(drv_priv->hwmem + MMIO_STATUS));
-            while(readl(drv_priv->hwmem + MMIO_STATUS) == 3){
-                count++;
-            };
-            for(int i = 0; i<length; i++){
-                buff[length-1-i] = readb(drv_priv->hwmem + MMIO_UNUSED_OFFSET + i);
-            }
-            printk("Status reg content final: %x %d\n", readl(drv_priv->hwmem + MMIO_STATUS), count);
-            printk("Buffer: %s\n", buff);
-            if(copy_to_user(addr, buff,length)){
-                pr_err("Copying key data from encryption to user failed\n");
-                return -1;
-            }
-            printk("End encryption");
-            // print_data(addr, length);
-            vfree(d_buff);
-            vfree(buff);
+            printk("End config\n");
             return ret;
 	}
 	return ret;
@@ -314,6 +310,18 @@ void release_device(struct pci_dev *pdev)
     pci_disable_device(pdev);
 }
 
+static irqreturn_t my_interrupt_handler(int irq, void * dev_id){
+    struct pci_dev *pdev = pci_get_device(CRYPTOCARD_VENDOR_ID, CRYPTOCARD_DEVICE_ID, NULL);
+    struct my_driver_priv *drv_priv = (struct my_driver_priv *) pci_get_drvdata(pdev);
+    u32 isr;
+    printk("In interrupt handler\n");
+
+    isr = readl(drv_priv->hwmem + MMIO_ISR_OFFSET);
+    writel(isr, drv_priv->hwmem + MMIO_ACK_OFFSET);
+    up(&drv_priv->sem);
+    return IRQ_HANDLED;
+}
+
 /* This function is called by the kernel */
 static int my_driver_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
@@ -327,6 +335,7 @@ static int my_driver_probe(struct pci_dev *pdev, const struct pci_device_id *ent
     pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
 
     printk(KERN_INFO "Device vid: 0x%X pid: 0x%X\n", vendor, device);
+    
 
     /* Request IO BAR */
     bar = pci_select_bars(pdev, IORESOURCE_MEM);
@@ -357,14 +366,24 @@ static int my_driver_probe(struct pci_dev *pdev, const struct pci_device_id *ent
         release_device(pdev);
         return -ENOMEM;
     }
+    sema_init(&drv_priv->sem, 0);
 
     /* Remap BAR to the local pointer */
+    drv_priv->is_interrupt = 0;
+    drv_priv->is_dma = 0;
     drv_priv->hwmem = ioremap(mmio_start, mmio_len);
     printk("Pointer base %lu\n", (unsigned long)drv_priv->hwmem);
 
     if (!drv_priv->hwmem) {
        release_device(pdev);
        return -EIO;
+    }
+
+    err = request_irq(pdev->irq, my_interrupt_handler, IRQF_SHARED, "my_pci_device", pdev);
+    if(err){
+        iounmap(drv_priv->hwmem);
+        pci_disable_device(pdev);
+        return err;
     }
 
 
@@ -389,6 +408,9 @@ static void my_driver_remove(struct pci_dev *pdev)
 
         kfree(drv_priv);
     }
+
+
+    free_irq(pdev->irq, pdev);
 
     release_device(pdev);
 }
