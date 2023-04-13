@@ -13,6 +13,12 @@ int main()
   strcpy(op_text, msg);
   cdev = create_handle();
 
+  int t = 1;
+
+  char *cx=(char *)(&t);
+
+  printf("%p %p %p\n", &cx[1], &cx[0], cx);
+
   if(cdev == ERROR)
   {
     printf("Unable to create handle for device\n");

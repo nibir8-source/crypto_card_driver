@@ -13,7 +13,7 @@
 #define MAJOR_NUM 100
 
 
-#define IOCTL_SET_KEY _IOR(MAJOR_NUM, 0, char*)
+#define IOCTL_SET_KEY _IOWR(MAJOR_NUM, 0, char*)
 #define IOCTL_ENCRYPT _IOWR(MAJOR_NUM, 1, char*)
 #define IOCTL_DECRYPT _IOWR(MAJOR_NUM, 2, char*)
 
@@ -96,7 +96,7 @@ int set_key(DEV_HANDLE cdev, KEY_COMP a, KEY_COMP b)
 {
   k_struct.a = a;
   k_struct.b = b;
-  printf("FD: %d %lu %d %d\n", cdev, IOCTL_SET_KEY, k_struct.a, k_struct.b);
+  printf("In set_key userspace FD: %d %lu %d %d\n", cdev, IOCTL_SET_KEY, k_struct.a, k_struct.b);
   if(ioctl(cdev, IOCTL_SET_KEY, &k_struct) < 0){
        return ERROR;
   }
