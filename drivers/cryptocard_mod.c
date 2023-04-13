@@ -128,9 +128,12 @@ long device_ioctl(struct file *file,
             }
             a = k_buff->a;
             b = k_buff->b;
+            // writel(a, drv_priv->hwmem + KEY_A_OFFSET);
+            // writel(b, drv_priv->hwmem + KEY_B_OFFSET);
+            printk("Ptr: %p\n", drv_priv->hwmem);
             *(drv_priv->hwmem + KEY_A_OFFSET) = a;
             *(drv_priv->hwmem + KEY_B_OFFSET) = b;
-            printk("Key writing finshed\n");
+            printk("Key writing finshed with values %d, %d\n", *(drv_priv->hwmem + KEY_A_OFFSET), *(drv_priv->hwmem + KEY_B_OFFSET));
             vfree(k_buff);
             return ret;
         case IOCTL_ENCRYPT:
@@ -317,7 +320,7 @@ static int my_driver_probe(struct pci_dev *pdev, const struct pci_device_id *ent
 
     /* Remap BAR to the local pointer */
     drv_priv->hwmem = ioremap(mmio_start, mmio_len);
-    printk(KERN_INFO "Device Memory ID: 0x%X\n", *(drv_priv->hwmem));
+    printk(KERN_INFO "Device Memory ID: 0x%X Addr: %p\n", *(drv_priv->hwmem), drv_priv->hwmem);
 
     if (!drv_priv->hwmem) {
        release_device(pdev);

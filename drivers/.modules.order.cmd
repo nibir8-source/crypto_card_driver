@@ -1,1 +1,1 @@
-cmd_/home/nibir/Downloads/template/drivers/modules.order := {   echo /home/nibir/Downloads/template/drivers/cryptocard_mod.ko; :; } > /home/nibir/Downloads/template/drivers/modules.order
+cmd_/home/sarthak/CS614/CS614/A3/crypto_card_driver/drivers/modules.order := {   echo /home/sarthak/CS614/CS614/A3/crypto_card_driver/drivers/cryptocard_mod.ko; :; } > /home/sarthak/CS614/CS614/A3/crypto_card_driver/drivers/modules.order

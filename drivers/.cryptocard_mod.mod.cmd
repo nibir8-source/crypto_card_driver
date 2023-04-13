@@ -1,1 +1,1 @@
-cmd_/home/nibir/Downloads/template/drivers/cryptocard_mod.mod := printf '%s\n'   cryptocard_mod.o | awk '!x[$$0]++ { print("/home/nibir/Downloads/template/drivers/"$$0) }' > /home/nibir/Downloads/template/drivers/cryptocard_mod.mod
+cmd_/home/sarthak/CS614/CS614/A3/crypto_card_driver/drivers/cryptocard_mod.mod := printf '%s\n'   cryptocard_mod.o | awk '!x[$$0]++ { print("/home/sarthak/CS614/CS614/A3/crypto_card_driver/drivers/"$$0) }' > /home/sarthak/CS614/CS614/A3/crypto_card_driver/drivers/cryptocard_mod.mod
