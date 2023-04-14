@@ -169,8 +169,8 @@ static int do_dma_enc_dec(struct data_struct *d_buff, ADDR_PTR addr, uint64_t le
         return -1;
     }
     writeq(length, drv_priv->hwmem + DMA_MSG_LEN);
-    writeq((drv_priv->is_interrupt? 4 : 0) | (d_buff->is_encrypt ? 0 : 2), drv_priv->hwmem + DMA_STATUS);
     writeq(drv_priv->dma_handle, drv_priv->hwmem + DMA_DATA_ADDR);
+    writeq((drv_priv->is_interrupt? 5 : 1) | (d_buff->is_encrypt ? 1 : 3), drv_priv->hwmem + DMA_STATUS);
     if(drv_priv->is_interrupt){
         if(down_interruptible(&drv_priv->sem)){
             return -ERESTARTSYS;

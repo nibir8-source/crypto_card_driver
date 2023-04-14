@@ -29,6 +29,11 @@ int main()
         exit(0);
     }
 
+    if(set_config(cdev, INTERRUPT, 1) == ERROR){
+        printf("Unable to set interrupt\n");
+        exit(0);
+    }
+
   printf("Original Text: %s\n", msg);
 
   encrypt(cdev, op_text, size, 0);
