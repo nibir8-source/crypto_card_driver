@@ -17,6 +17,7 @@
 #include <linux/device.h>
 #include <linux/io.h>
 #include <linux/semaphore.h>
+#include <linux/dma-mapping.h>
 
 #include "cryptocard_mod.h"
 
@@ -29,8 +30,12 @@
 #define MMIO_DATA_ADDR 128
 #define MMIO_UNUSED_OFFSET 168
 #define OFF 8
-#define MMIO_ISR_OFFSET 36
-#define MMIO_ACK_OFFSET 100
+#define ISR_OFFSET 36
+#define ACK_OFFSET 100
+#define DMA_BUFFER_SIZE PAGE_SIZE
+#define DMA_DATA_ADDR 144
+#define DMA_MSG_LEN 152
+#define DMA_STATUS 160
 
 #define CRYPTOCARD_VENDOR_ID 0x1234
 #define CRYPTOCARD_DEVICE_ID 0xDEBA
@@ -71,6 +76,7 @@ struct my_driver_priv {
     struct semaphore sem;
     void *dma_buffer;
     size_t buffer_size;
+    dma_addr_t dma_handle;
 };
 
 
@@ -117,6 +123,74 @@ device_write(struct file *filp, const char *buff, size_t len, loff_t * off){
 //     return 0;
 // }
 
+static int do_mmio_enc_dec(struct data_struct *d_buff, ADDR_PTR addr, uint64_t length){
+    int flag;
+    char *buff = NULL;
+    struct pci_dev *pdev = pci_get_device(CRYPTOCARD_VENDOR_ID, CRYPTOCARD_DEVICE_ID, NULL);
+    struct my_driver_priv *drv_priv = (struct my_driver_priv *) pci_get_drvdata(pdev);
+    printk("Start MMIO\n");
+    buff = (char *)vmalloc(length);
+    if(copy_from_user(buff,(char *)addr,length)){
+        pr_err("Copying data from cryption from user failed\n");
+        return -1;
+    }
+    writel(length, drv_priv->hwmem + MMIO_MSG_LEN);
+    writel((drv_priv->is_interrupt? 128 : 0) | (d_buff->is_encrypt ? 0 : 2), drv_priv->hwmem + MMIO_STATUS);
+    for(int i = 0; i<length; i++){
+        writeb(buff[length-1-i], drv_priv->hwmem + MMIO_UNUSED_OFFSET + i);
+    }
+    writeq(MMIO_UNUSED_OFFSET, drv_priv->hwmem + MMIO_DATA_ADDR);
+    if(drv_priv->is_interrupt){
+        if(down_interruptible(&drv_priv->sem)){
+            return -ERESTARTSYS;
+        }
+    }else {
+        flag = 1 | (d_buff->is_encrypt ? 0 : 2);
+        while(readl(drv_priv->hwmem + MMIO_STATUS) == flag);
+    }
+    for(int i = 0; i<length; i++){
+        buff[length-1-i] = readb(drv_priv->hwmem + MMIO_UNUSED_OFFSET + i);
+    }
+    if(copy_to_user(addr, buff,length)){
+        pr_err("Copying data from cryption to user failed\n");
+        return -1;
+    }
+    printk("End MMIO\n");
+    return 0;
+}
+
+static int do_dma_enc_dec(struct data_struct *d_buff, ADDR_PTR addr, uint64_t length){
+    int flag, counter=0;
+    struct pci_dev *pdev = pci_get_device(CRYPTOCARD_VENDOR_ID, CRYPTOCARD_DEVICE_ID, NULL);
+    struct my_driver_priv *drv_priv = (struct my_driver_priv *) pci_get_drvdata(pdev);
+    printk("Start DMA\n");
+    if(copy_from_user(drv_priv->dma_buffer,(char *)addr,length)){
+        pr_err("Copying data from cryption from user failed\n");
+        return -1;
+    }
+    writeq(length, drv_priv->hwmem + DMA_MSG_LEN);
+    writeq((drv_priv->is_interrupt? 4 : 0) | (d_buff->is_encrypt ? 0 : 2), drv_priv->hwmem + DMA_STATUS);
+    writeq(drv_priv->dma_handle, drv_priv->hwmem + DMA_DATA_ADDR);
+    if(drv_priv->is_interrupt){
+        if(down_interruptible(&drv_priv->sem)){
+            return -ERESTARTSYS;
+        }
+    }else {
+        flag = 1 | (d_buff->is_encrypt ? 0 : 2);
+        printk("DMA status: %llx", readq(drv_priv->hwmem + DMA_STATUS));
+        while(readq(drv_priv->hwmem + DMA_STATUS) == flag){
+            counter++;
+        };
+        printk("DMA loop counter: %d\n", counter);
+    }
+    if(copy_to_user(addr, drv_priv->dma_buffer,length)){
+        pr_err("Copying data from cryption to user failed\n");
+        return -1;
+    }
+    printk("End DMA\n");
+    return 0;
+}
+
 long device_ioctl(struct file *file,	
 		 unsigned int ioctl_num,
 		 unsigned long ioctl_param)
@@ -126,14 +200,12 @@ long device_ioctl(struct file *file,
 	struct key_struct *k_buff = NULL;
     struct data_struct *d_buff = NULL;
     struct config_struct *cfg_buff = NULL;
-    char *buff = NULL;
     KEY_COMP a, b;
     ADDR_PTR addr;
     uint64_t length;
     uint8_t isMapped;
     struct pci_dev *pdev = pci_get_device(CRYPTOCARD_VENDOR_ID, CRYPTOCARD_DEVICE_ID, NULL);
     struct my_driver_priv *drv_priv = (struct my_driver_priv *) pci_get_drvdata(pdev);
-    int flag;
     config_t type;
     uint8_t value;
     // unsigned long long bt, ct, dt;
@@ -166,36 +238,22 @@ long device_ioctl(struct file *file,
             addr = d_buff->addr;
             length = d_buff->length;
             isMapped = d_buff->isMapped;
-            buff = (char *)vmalloc(length);
-            if(copy_from_user(buff,(char *)addr,length)){
-                pr_err("Copying key data from cryption from user failed\n");
-                return -1;
-            }
-            writel(length, drv_priv->hwmem + MMIO_MSG_LEN);
-            writel((drv_priv->is_interrupt? 128 : 0) | (d_buff->is_encrypt ? 0 : 2), drv_priv->hwmem + MMIO_STATUS);
-            for(int i = 0; i<length; i++){
-                writeb(buff[length-1-i], drv_priv->hwmem + MMIO_UNUSED_OFFSET + i);
-            }
-            writeq(MMIO_UNUSED_OFFSET, drv_priv->hwmem + MMIO_DATA_ADDR);
-            if(drv_priv->is_interrupt){
-                if(down_interruptible(&drv_priv->sem)){
-                    return -ERESTARTSYS;
+            if(drv_priv->is_dma){
+                if(do_dma_enc_dec(d_buff, addr, length)){
+                    pr_err("DMA encryption decryption failed\n");
+                    vfree(d_buff);
+                    return -1;
                 }
-            }else {
-                flag = 1 | (d_buff->is_encrypt ? 0 : 2);
-                while(readl(drv_priv->hwmem + MMIO_STATUS) == flag);
-            }
-            for(int i = 0; i<length; i++){
-                buff[length-1-i] = readb(drv_priv->hwmem + MMIO_UNUSED_OFFSET + i);
-            }
-            if(copy_to_user(addr, buff,length)){
-                pr_err("Copying key data from cryption to user failed\n");
-                return -1;
+            }else{
+                if(do_mmio_enc_dec(d_buff, addr, length)){
+                    pr_err("MMIO encryption decryption failed\n");
+                    vfree(d_buff);
+                    return -1;
+                }
             }
             printk("End cryption");
             // print_data(addr, length);
             vfree(d_buff);
-            vfree(buff);
             return ret;
         case IOCTL_SET_CONFIG:
             printk("Start config\n");
@@ -316,8 +374,8 @@ static irqreturn_t my_interrupt_handler(int irq, void * dev_id){
     u32 isr;
     printk("In interrupt handler\n");
 
-    isr = readl(drv_priv->hwmem + MMIO_ISR_OFFSET);
-    writel(isr, drv_priv->hwmem + MMIO_ACK_OFFSET);
+    isr = readl(drv_priv->hwmem + ISR_OFFSET);
+    writel(isr, drv_priv->hwmem + ACK_OFFSET);
     up(&drv_priv->sem);
     return IRQ_HANDLED;
 }
@@ -369,6 +427,8 @@ static int my_driver_probe(struct pci_dev *pdev, const struct pci_device_id *ent
     sema_init(&drv_priv->sem, 0);
 
     /* Remap BAR to the local pointer */
+    // drv_priv->buffer_size = DMA_BUFFER_SIZE;
+    // drv_priv->dma_buffer = dma_alloc_coherent(&pdev->dev, drv_priv->buffer_size, dma_handle, GFP_KERNEL | GFP_ATOMIC);
     drv_priv->is_interrupt = 0;
     drv_priv->is_dma = 0;
     drv_priv->hwmem = ioremap(mmio_start, mmio_len);
@@ -379,11 +439,26 @@ static int my_driver_probe(struct pci_dev *pdev, const struct pci_device_id *ent
        return -EIO;
     }
 
+    err = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
+    if(err){
+        dev_err(&pdev->dev, "Failed to set DMA mask for device\n");
+        goto error;
+    }
+
+    drv_priv->dma_buffer = dma_alloc_coherent(&pdev->dev, DMA_BUFFER_SIZE, &drv_priv->dma_handle, GFP_KERNEL);
+    if(!drv_priv->dma_buffer){
+        dev_err(&pdev->dev, "Failed to allocate DMA buffer\n");
+        err = -ENOMEM;
+        goto error;
+    }
+
+    printk("DMA buffer: %p, DMA Handle: %llx\n", drv_priv->dma_buffer, drv_priv->dma_handle);
+
     err = request_irq(pdev->irq, my_interrupt_handler, IRQF_SHARED, "my_pci_device", pdev);
     if(err){
         iounmap(drv_priv->hwmem);
         pci_disable_device(pdev);
-        return err;
+        goto error;
     }
 
 
@@ -395,6 +470,11 @@ static int my_driver_probe(struct pci_dev *pdev, const struct pci_device_id *ent
     // write_sample_data(pdev);
 
     return 0;
+error:
+    if(drv_priv->dma_buffer){
+        dma_free_coherent(&pdev->dev, DMA_BUFFER_SIZE, drv_priv->dma_buffer, drv_priv->dma_handle);
+    }
+    return err;
 }
 
 static void my_driver_remove(struct pci_dev *pdev)
