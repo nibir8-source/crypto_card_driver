@@ -67,6 +67,11 @@ struct config_struct{
   uint8_t value;
 };
 
+struct map_struct{
+  ADDR_PTR addr;
+  uint64_t size;
+};
+
 /* This is a "private" data structure */
 /* You can store there any data that should be passed between driver's functions */
 struct my_driver_priv {
@@ -77,6 +82,7 @@ struct my_driver_priv {
     void *dma_buffer;
     size_t buffer_size;
     dma_addr_t dma_handle;
+    unsigned long user_addr;
 };
 
 
@@ -200,6 +206,7 @@ long device_ioctl(struct file *file,
 	struct key_struct *k_buff = NULL;
     struct data_struct *d_buff = NULL;
     struct config_struct *cfg_buff = NULL;
+    struct map_struct *mp_buff = NULL;
     KEY_COMP a, b;
     ADDR_PTR addr;
     uint64_t length;
@@ -208,6 +215,9 @@ long device_ioctl(struct file *file,
     struct my_driver_priv *drv_priv = (struct my_driver_priv *) pci_get_drvdata(pdev);
     config_t type;
     uint8_t value;
+    unsigned long pfn;
+    unsigned long user_addr;
+    struct vm_struct *vma;
     // unsigned long long bt, ct, dt;
 	/*
 	 * Switch according to the ioctl called
@@ -270,6 +280,37 @@ long device_ioctl(struct file *file,
                 drv_priv->is_dma = value;
             }
             printk("End config\n");
+            return ret;
+        case IOCTL_MAP_CARD:
+            printk("Start map card\n");
+            mp_buff = (struct map_struct*)vmalloc(sizeof(struct map_struct)) ;
+            if(copy_from_user(mp_buff,(char*)ioctl_param,sizeof(struct map_struct))){
+                pr_err("Copying key data for mapping from user failed\n");
+                return -1;
+            }
+            mmap_write_lock(current->mm);
+            pfn = virt_to_phys(pdev->dma_buffer) >> PAGE_SHIFT;
+            user_addr = (unsigned long)vm_mmap(file, 0, MB_1, PROT_READ | PROT_WRITE, 0);
+            if(user_addr == (unsigned long)MAP_FAILED){
+                return -ENOMEM;
+            }
+            drv_priv->user_addr = user_addr;
+            vma = find_vma(current->mm, user_addr);
+            ret = remap_pfn_range(vma, user_addr, pfn, MB_1, vma->vm_page_prot);
+            mp_buff->addr = user_addr;
+            if(copy_to_user((char*)ioctl_param, mp_buff,sizeof(struct map_struct))){
+                pr_err("Copying key data for mapping from user failed\n");
+                return -1;
+            }
+            mmap_write_unlock(current->mm);
+            printk("End map card\n");
+            return ret;
+        case IOCTL_UNMAP_CARD:
+            mmap_write_lock(current->mm);
+            user_addr = drv_priv->user_addr;
+            vma = find_vma(current->mm, user_addr);
+            vm_munmap(vma, user_addr);
+            mmap_write_unlock(current->mm);
             return ret;
 	}
 	return ret;
@@ -491,6 +532,10 @@ static void my_driver_remove(struct pci_dev *pdev)
 
 
     free_irq(pdev->irq, pdev);
+
+    if(drv_priv->dma_buffer){
+        dma_free_coherent(&pdev->dev, DMA_BUFFER_SIZE, drv_priv->dma_buffer, drv_priv->dma_handle);
+    }
 
     release_device(pdev);
 }

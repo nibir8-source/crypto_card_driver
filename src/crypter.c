@@ -10,6 +10,8 @@
 #include <sys/types.h>
 #include <sys/ioctl.h>
 
+#define MB_1 1048576
+
 struct key_struct{
   KEY_COMP a;
   KEY_COMP b;
@@ -25,6 +27,11 @@ struct data_struct{
 struct config_struct{
   config_t type;
   uint8_t value;
+};
+
+struct map_struct{
+  ADDR_PTR addr;
+  uint64_t size;
 };
 
 struct key_struct k_struct;
@@ -128,7 +135,16 @@ Takes three arguments
 Return virtual address of the mapped memory*/
 ADDR_PTR map_card(DEV_HANDLE cdev, uint64_t size)
 {
-  return NULL;
+  if(size > MB_1){
+    printf("Size more than 1 MB\n");
+    return NULL;
+  }
+  struct map_struct mp;
+  mp.size = size;
+  if(ioctl(cdev, IOCTL_MAP_CARD, &mp) < 0){
+       return ERROR;
+  }
+  return mp.addr;
 }
 
 /*Function template to device input/output memory into user space.
