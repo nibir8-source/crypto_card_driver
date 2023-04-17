@@ -18,6 +18,7 @@
 #include <linux/io.h>
 #include <linux/semaphore.h>
 #include <linux/dma-mapping.h>
+#include <uapi/asm-generic/mman-common.h>
 
 #include "cryptocard_mod.h"
 
@@ -56,7 +57,7 @@ struct key_struct{
 };
 
 struct data_struct{
-  ADDR_PTR addr;
+  uint64_t addr;
   uint64_t length;
   uint8_t isMapped;
   int is_encrypt;
@@ -82,9 +83,10 @@ struct my_driver_priv {
     void *dma_buffer;
     size_t buffer_size;
     dma_addr_t dma_handle;
-    unsigned long user_addr;
+    uint64_t size;
 };
 
+uint64_t base_addr;
 
 static int demo_open(struct inode *inode, struct file *file)
 {
@@ -117,17 +119,61 @@ device_write(struct file *filp, const char *buff, size_t len, loff_t * off){
     return 8;
 }
 
-// static int print_data(void * addr, int length){
-//     char *buff = NULL;
-//     buff = (char *)vmalloc(length);
-//     if(copy_from_user(buff, addr,length)){
-//         pr_err("Copying key data from encryption from user failed\n");
-//         return -1;
-//     }
-//     printk("Data content: %s\n", buff);
-//     vfree(buff);
-//     return 0;
-// }
+pte_t* return_pfn(struct mm_struct * mm, unsigned long addr){
+	// unsigned long * pgd,p4d,pud,pmd,ptep,pte;
+	pgd_t*pgd;
+	p4d_t* p4d;
+	pud_t* pud;
+	pmd_t * pmd;
+	pte_t * ptep;
+	pte_t pte;
+
+
+
+	pgd = pgd_offset(mm, addr);
+	if (pgd_none(*pgd) || pgd_bad(*pgd)){
+    printk("Invalid pgd");
+    return NULL;
+	}
+
+	p4d = p4d_offset(pgd, addr);
+	if (p4d_none(*p4d) || p4d_bad(*p4d)){
+		printk("Invalid p4d");
+		return NULL;
+	}
+
+	pud = pud_offset(p4d, addr);
+	if (pud_none(*pud) || pud_bad(*pud)){
+		printk("Invalid pud");
+		return NULL;
+	}
+
+	pmd = pmd_offset(pud, addr);
+	if (pmd_none(*pmd) || pmd_bad(*pmd)){
+		printk("Invalid pmd");
+		return NULL;
+	}
+
+
+	ptep = pte_offset_map(pmd, addr);
+	if (!ptep){
+		printk("Invalid ptep");
+		return NULL;
+	}
+
+	// printk("Ptep: %p\n",ptep);
+	 pte = *ptep;
+
+	if (pte_present(pte)){
+		
+		return ptep;
+		
+	}	
+
+	return NULL;
+
+}
+
 
 static int do_mmio_enc_dec(struct data_struct *d_buff, ADDR_PTR addr, uint64_t length){
     int flag;
@@ -165,6 +211,41 @@ static int do_mmio_enc_dec(struct data_struct *d_buff, ADDR_PTR addr, uint64_t l
     return 0;
 }
 
+static int do_mmio_mapped(struct data_struct *d_buff, ADDR_PTR addr, uint64_t length){
+    int flag;
+    char *buff = NULL;
+    struct pci_dev *pdev = pci_get_device(CRYPTOCARD_VENDOR_ID, CRYPTOCARD_DEVICE_ID, NULL);
+    struct my_driver_priv *drv_priv = (struct my_driver_priv *) pci_get_drvdata(pdev);
+    buff = (char *)vmalloc(length);
+    // buff[0] = buff[1] ='a';
+    printk("Start MMIO user space mapped at mapped addr %llx\n", (unsigned long long)addr);
+    for(int i = 0; i<length; i++){
+        buff[length-1-i] = readb(drv_priv->hwmem + (unsigned long long)(addr) - base_addr + i);
+        // printk("%c", buff[length-1-i]);
+    }
+    printk("Buff Value Before: %s\n", buff);
+    printk("Length: %lld, BAD: %lld \n", length, (unsigned long long)(addr) - base_addr);
+    writel(length, drv_priv->hwmem + MMIO_MSG_LEN);
+    writel((drv_priv->is_interrupt? 128 : 0) | (d_buff->is_encrypt ? 0 : 2), drv_priv->hwmem + MMIO_STATUS);
+    writeq((unsigned long long)(addr) - base_addr, drv_priv->hwmem + MMIO_DATA_ADDR);
+    if(drv_priv->is_interrupt){
+        if(down_interruptible(&drv_priv->sem)){
+            return -ERESTARTSYS;
+        }
+    }else {
+        flag = 1 | (d_buff->is_encrypt ? 0 : 2);
+        while(readl(drv_priv->hwmem + MMIO_STATUS) == flag);
+    }
+    for(int i = 0; i<length; i++){
+        buff[length-1-i] = readb(drv_priv->hwmem + (unsigned long long)(addr) - base_addr + i);
+        // printk("%c", buff[length-1-i]);
+    }
+    printk("Buff Value After: %s\n", buff);
+    printk("End MMIO user space mapped\n");
+    vfree(buff);
+    return 0;
+}
+
 static int do_dma_enc_dec(struct data_struct *d_buff, ADDR_PTR addr, uint64_t length){
     int flag, counter=0;
     struct pci_dev *pdev = pci_get_device(CRYPTOCARD_VENDOR_ID, CRYPTOCARD_DEVICE_ID, NULL);
@@ -197,6 +278,10 @@ static int do_dma_enc_dec(struct data_struct *d_buff, ADDR_PTR addr, uint64_t le
     return 0;
 }
 
+
+
+
+
 long device_ioctl(struct file *file,	
 		 unsigned int ioctl_num,
 		 unsigned long ioctl_param)
@@ -217,7 +302,9 @@ long device_ioctl(struct file *file,
     uint8_t value;
     unsigned long pfn;
     unsigned long user_addr;
-    struct vm_struct *vma;
+    struct vm_area_struct *vma;
+    pte_t *pte;
+    VMA_ITERATOR(vmi, current->mm, 0);
     // unsigned long long bt, ct, dt;
 	/*
 	 * Switch according to the ioctl called
@@ -245,9 +332,14 @@ long device_ioctl(struct file *file,
                 pr_err("Copying key data from encryption from user failed\n");
                 return -1;
             }
-            addr = d_buff->addr;
+            addr = (ADDR_PTR)d_buff->addr;
             length = d_buff->length;
             isMapped = d_buff->isMapped;
+            mmap_read_lock(current->mm);
+            pte = return_pfn(current->mm, d_buff->addr);
+            mmap_read_unlock(current->mm);
+            printk("%lx, %llx", pte->pte, pci_resource_start(pdev, 0) + MMIO_UNUSED_OFFSET);
+            printk("Data: %llx, %lld, %d\n", d_buff->addr, length, isMapped);
             if(drv_priv->is_dma){
                 if(do_dma_enc_dec(d_buff, addr, length)){
                     pr_err("DMA encryption decryption failed\n");
@@ -255,10 +347,18 @@ long device_ioctl(struct file *file,
                     return -1;
                 }
             }else{
-                if(do_mmio_enc_dec(d_buff, addr, length)){
-                    pr_err("MMIO encryption decryption failed\n");
-                    vfree(d_buff);
-                    return -1;
+                if(isMapped){
+                    if(do_mmio_mapped(d_buff, addr, length)){
+                        pr_err("User space MMIO encryption decryption failed\n");
+                        vfree(d_buff);
+                        return -1;
+                    }
+                }else{
+                    if(do_mmio_enc_dec(d_buff, addr, length)){
+                        pr_err("MMIO encryption decryption failed\n");
+                        vfree(d_buff);
+                        return -1;
+                    }
                 }
             }
             printk("End cryption");
@@ -280,7 +380,44 @@ long device_ioctl(struct file *file,
                 drv_priv->is_dma = value;
             }
             printk("End config\n");
+            vfree(cfg_buff);
             return ret;
+        case IOCTL_GET_ADDR:
+
+            printk("Start GET_ADDR \n");
+            mp_buff = (struct map_struct*)vmalloc(sizeof(struct map_struct)) ;
+            if(copy_from_user(mp_buff,(char*)ioctl_param,sizeof(struct map_struct))){
+                pr_err("Copying key data for mapping from user failed\n");
+                return -1;
+            }
+            printk("Copy from user done\n");
+           
+
+            mmap_read_lock(current->mm);
+            user_addr = 0;
+            for_each_vma(vmi, vma){
+                printk("Start: %lx, End: %lx\n", vma->vm_start, vma->vm_end);
+                user_addr = vma->vm_start - 2*MB_1;
+                break;
+            }
+            mmap_read_unlock(current->mm);
+            if(user_addr != 0){
+                mp_buff->addr = (ADDR_PTR )user_addr;
+            }
+            
+            if(copy_to_user((char *)ioctl_param, mp_buff,sizeof(struct map_struct))){
+                pr_err("Copying key data for mapping from user failed\n");
+                vfree(mp_buff);
+                return -1;
+            }
+            printk("Copy to user done\n");
+            vfree(mp_buff);
+            if(user_addr != 0){
+                return 0;
+            }
+            else{
+                return -1;
+            }
         case IOCTL_MAP_CARD:
             printk("Start map card\n");
             mp_buff = (struct map_struct*)vmalloc(sizeof(struct map_struct)) ;
@@ -288,29 +425,46 @@ long device_ioctl(struct file *file,
                 pr_err("Copying key data for mapping from user failed\n");
                 return -1;
             }
+            printk("Copy from user done\n");
+            user_addr = (unsigned long)mp_buff->addr;
             mmap_write_lock(current->mm);
-            pfn = virt_to_phys(pdev->dma_buffer) >> PAGE_SHIFT;
-            user_addr = (unsigned long)vm_mmap(file, 0, MB_1, PROT_READ | PROT_WRITE, 0);
-            if(user_addr == (unsigned long)MAP_FAILED){
-                return -ENOMEM;
-            }
-            drv_priv->user_addr = user_addr;
+            pfn = (pci_resource_start(pdev, 0)) >> PAGE_SHIFT;
             vma = find_vma(current->mm, user_addr);
-            ret = remap_pfn_range(vma, user_addr, pfn, MB_1, vma->vm_page_prot);
-            mp_buff->addr = user_addr;
-            if(copy_to_user((char*)ioctl_param, mp_buff,sizeof(struct map_struct))){
-                pr_err("Copying key data for mapping from user failed\n");
-                return -1;
+            if(vma->vm_end - vma->vm_start != mp_buff->size){
+                printk("Err: %lu\n ",vma->vm_end - vma->vm_start);
+                mmap_write_unlock(current->mm);
+                return -EINVAL;
             }
+            ret = io_remap_pfn_range(vma, vma->vm_start, pfn, vma->vm_end - vma->vm_start, vma->vm_page_prot);
+            if (ret) {
+                printk(KERN_ERR "remap_pfn_range failed %d\n", ret);
+                mmap_write_unlock(current->mm);
+                vfree(mp_buff);
+                return -EAGAIN;
+            }
+            for(int i = 0; i<256; i++){
+                pte = return_pfn(current->mm, user_addr + i*PAGE_SIZE);
+                pte->pte <<= 1;
+                pte->pte >>= 1;
+                pte->pte |= 0x067;
+            }
+            base_addr = (uint64_t)user_addr;
+            printk("User addr: %lx, %lx\n", user_addr + 168, pte->pte);
             mmap_write_unlock(current->mm);
+            vfree(mp_buff);
             printk("End map card\n");
             return ret;
         case IOCTL_UNMAP_CARD:
-            mmap_write_lock(current->mm);
-            user_addr = drv_priv->user_addr;
-            vma = find_vma(current->mm, user_addr);
-            vm_munmap(vma, user_addr);
-            mmap_write_unlock(current->mm);
+            printk("Start unmap card\n");
+            // mp_buff = (struct map_struct*)vmalloc(sizeof(struct map_struct)) ;
+            // if(copy_from_user(mp_buff,(char*)ioctl_param,sizeof(struct map_struct))){
+            //     pr_err("Copying key data for mapping from user failed\n");
+            //     return -1;
+            // }
+            // mmap_write_lock(current->mm);
+            // vm_munmap((unsigned long)mp_buff->addr, drv_priv->size);
+            // mmap_write_unlock(current->mm);
+            printk("End unmap card\n");
             return ret;
 	}
 	return ret;
@@ -493,7 +647,7 @@ static int my_driver_probe(struct pci_dev *pdev, const struct pci_device_id *ent
         goto error;
     }
 
-    printk("DMA buffer: %p, DMA Handle: %llx\n", drv_priv->dma_buffer, drv_priv->dma_handle);
+    printk("DMA buffer phys: %llx, DMA Handle: %llx\n", virt_to_phys(drv_priv->dma_buffer), drv_priv->dma_handle);
 
     err = request_irq(pdev->irq, my_interrupt_handler, IRQF_SHARED, "my_pci_device", pdev);
     if(err){

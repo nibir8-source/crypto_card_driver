@@ -33,6 +33,15 @@ test2: $(OBJ)/test2.o $(LIB)/libcrypter.so
 test3: $(OBJ)/test3.o $(LIB)/libcrypter.so
 	$(CC) -o $@ -I$(INC) $< -L$(LIB) -lcrypter
 
+test4: $(OBJ)/test4.o $(LIB)/libcrypter.so
+	$(CC) -o $@ -I$(INC) $< -L$(LIB) -lcrypter
+
+test5: $(OBJ)/test5.o $(LIB)/libcrypter.so
+	$(CC) -o $@ -I$(INC) $< -L$(LIB) -lcrypter
+
+test6: $(OBJ)/test6.o $(LIB)/libcrypter.so
+	$(CC) -o $@ -I$(INC) $< -L$(LIB) -lcrypter
+
 dma: $(BENCH_OBJ)/dma.o $(LIB)/libcrypter.so
 	$(CC) -o $@ -I$(INC) $< -L$(LIB) -lcrypter
 

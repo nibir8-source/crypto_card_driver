@@ -1162,6 +1162,7 @@ deps_/home/nibir/Downloads/template/drivers/cryptocard_mod.o := \
   arch/x86/include/asm/tlbflush.h \
   arch/x86/include/asm/invpcid.h \
   arch/x86/include/asm/pti.h \
+  include/uapi/asm-generic/mman-common.h \
   /home/nibir/Downloads/template/drivers/cryptocard_mod.h \
 
 /home/nibir/Downloads/template/drivers/cryptocard_mod.o: $(deps_/home/nibir/Downloads/template/drivers/cryptocard_mod.o)

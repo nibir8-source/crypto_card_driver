@@ -13,6 +13,7 @@
 #define IOCTL_SET_CONFIG _IOWR(MAJOR_NUM, 2, char*)
 #define IOCTL_MAP_CARD _IOWR(MAJOR_NUM, 3, char*)
 #define IOCTL_UNMAP_CARD _IOWR(MAJOR_NUM, 4, char*)
+#define IOCTL_GET_ADDR _IOWR(MAJOR_NUM, 5, char*)
 
 typedef enum {INTERRUPT, DMA} config_t;
 
