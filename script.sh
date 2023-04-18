@@ -1,2 +1,2 @@
 #!/bin/bash
-cd drivers && ./script.sh && cd .. && make test6 && ./test6
+cd drivers && ./script.sh && cd .. && make test1 && ./test1
