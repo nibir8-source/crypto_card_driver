@@ -25,12 +25,11 @@ void* thread_function(void* arg)
   uint64_t size = strlen(msg);
   char op_text[size + 3];
   strcpy(op_text, msg);
-
+  printf("TID: %d IS_DMA: %d, IS_INT: %d\n", tid, is_dma, is_interrupt);
   if(set_key(cdev, a, b) == ERROR){
     printf("Unable to set key\n");
     exit(0);
   }
-
   if(set_config(cdev, DMA, is_dma) == ERROR){
       printf("Unable to set DMA\n");
       exit(0);

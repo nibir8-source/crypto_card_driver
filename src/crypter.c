@@ -209,8 +209,8 @@ ADDR_PTR map_card(DEV_HANDLE cdev, uint64_t size)
     return NULL;
   }
   map_count++;
-  addr_start = mp.addr + 168 + size;
-  addr_org = mp.addr;
+  addr_start = (unsigned long long)mp.addr + 168 + size;
+  addr_org = (unsigned long long)mp.addr;
   return (mp.addr + 168);
 }
 
@@ -224,6 +224,6 @@ void unmap_card(DEV_HANDLE cdev, ADDR_PTR addr)
     map_count--;
   }
   if(map_count == 0){
-    munmap(addr_org, MB_1);
+    munmap((void *)addr_org, MB_1);
   }
 }

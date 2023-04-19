@@ -319,6 +319,10 @@ long device_ioctl(struct file *file,
 	/*
 	 * Switch according to the ioctl called
 	 */
+    if(down_interruptible(&lock)){
+        printk("%d Down Error\n", current->pid);
+        return -ERESTARTSYS;
+    }
 	switch (ioctl_num) {
         case IOCTL_SET_KEY:
             printk("Set key a and b\n");
@@ -332,16 +336,18 @@ long device_ioctl(struct file *file,
             ps[pid].a = a;
             ps[pid].b = b;
             ps[pid].key_set_flag = 1;
+            
             writel((a<<8) | b, drv_priv->hwmem + OFF);
+            up(&lock);
             vfree(k_buff);
             printk("Key writing finshed\n");
             return ret;
         case IOCTL_ENC_DEC:
             printk("%d Inc Dec Entry\n", current->pid);
-            if(down_interruptible(&lock)){
-                printk("%d Down error\n", current->pid);
-                return -ERESTARTSYS;
-            }
+            // if(down_interruptible(&lock)){
+            //     printk("%d Down error\n", current->pid);
+            //     return -ERESTARTSYS;
+            // }
             printk("%d Start cryption\n", current->pid);
             d_buff = (struct data_struct*)vmalloc(sizeof(struct data_struct)) ;
             if(copy_from_user(d_buff,(char*)ioctl_param,sizeof(struct data_struct))){
@@ -355,6 +361,7 @@ long device_ioctl(struct file *file,
             if(ps[pid].key_set_flag){
                 a = ps[pid].a;
                 b = ps[pid].b;
+                // printk("Setting key: %d, %d\n", a, b);
                 writel((a<<8) | b, drv_priv->hwmem + OFF);
             }
             if(ps[pid].is_dma){
@@ -390,7 +397,8 @@ long device_ioctl(struct file *file,
             printk("Start config\n");
             cfg_buff = (struct config_struct*)vmalloc(sizeof(struct config_struct)) ;
             if(copy_from_user(cfg_buff,(char*)ioctl_param,sizeof(struct config_struct))){
-                pr_err("Copying key data from encryption from user failed\n");
+                pr_err("Copying config data from encryption from user failed\n");
+                up(&lock);
                 return -1;
             }
             type = cfg_buff->type;
@@ -402,6 +410,7 @@ long device_ioctl(struct file *file,
             }
             printk("End config\n");
             vfree(cfg_buff);
+            up(&lock);
             return ret;
         case IOCTL_GET_ADDR:
 
@@ -409,6 +418,7 @@ long device_ioctl(struct file *file,
             mp_buff = (struct map_struct*)vmalloc(sizeof(struct map_struct)) ;
             if(copy_from_user(mp_buff,(char*)ioctl_param,sizeof(struct map_struct))){
                 pr_err("Copying key data for mapping from user failed\n");
+                up(&lock);
                 return -1;
             }
             printk("Copy from user done\n");
@@ -429,14 +439,19 @@ long device_ioctl(struct file *file,
             if(copy_to_user((char *)ioctl_param, mp_buff,sizeof(struct map_struct))){
                 pr_err("Copying key data for mapping from user failed\n");
                 vfree(mp_buff);
+                up(&lock);
                 return -1;
             }
             printk("Copy to user done\n");
             vfree(mp_buff);
             if(user_addr != 0){
+            up(&lock);
+
                 return 0;
             }
             else{
+            up(&lock);
+        
                 return -1;
             }
         case IOCTL_MAP_CARD:
@@ -444,6 +459,8 @@ long device_ioctl(struct file *file,
             mp_buff = (struct map_struct*)vmalloc(sizeof(struct map_struct)) ;
             if(copy_from_user(mp_buff,(char*)ioctl_param,sizeof(struct map_struct))){
                 pr_err("Copying key data for mapping from user failed\n");
+            up(&lock);
+        
                 return -1;
             }
             printk("Copy from user done\n");
@@ -454,6 +471,8 @@ long device_ioctl(struct file *file,
             if(vma->vm_end - vma->vm_start != mp_buff->size){
                 printk("Err: %lu\n ",vma->vm_end - vma->vm_start);
                 mmap_write_unlock(current->mm);
+            up(&lock);
+        
                 return -EINVAL;
             }
             ret = io_remap_pfn_range(vma, vma->vm_start, pfn, vma->vm_end - vma->vm_start, vma->vm_page_prot);
@@ -461,6 +480,8 @@ long device_ioctl(struct file *file,
                 printk(KERN_ERR "remap_pfn_range failed %d\n", ret);
                 mmap_write_unlock(current->mm);
                 vfree(mp_buff);
+            up(&lock);
+        
                 return -EAGAIN;
             }
             for(int i = 0; i<256; i++){
@@ -474,6 +495,8 @@ long device_ioctl(struct file *file,
             mmap_write_unlock(current->mm);
             vfree(mp_buff);
             printk("End map card\n");
+            up(&lock);
+    
             return ret;
         case IOCTL_UNMAP_CARD:
             printk("Start unmap card\n");
@@ -486,8 +509,12 @@ long device_ioctl(struct file *file,
             // vm_munmap((unsigned long)mp_buff->addr, drv_priv->size);
             // mmap_write_unlock(current->mm);
             printk("End unmap card\n");
+            up(&lock);
+    
             return ret;
 	}
+            up(&lock);
+
 	return ret;
 }
 
@@ -721,8 +748,8 @@ static void my_driver_remove(struct pci_dev *pdev)
 }
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Nibir Baruah <contact@nibir@iitk.ac.in>");
-MODULE_DESCRIPTION("Test PCI driver");
+MODULE_AUTHOR("Sarthak Rout <sarthakr@iitk.ac.in>");
+MODULE_DESCRIPTION("PCI driver");
 MODULE_VERSION("0.1");
 
 module_init(mypci_driver_init);
