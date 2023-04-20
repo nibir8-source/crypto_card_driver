@@ -42,6 +42,9 @@ test5: $(OBJ)/test5.o $(LIB)/libcrypter.so
 test6: $(OBJ)/test6.o $(LIB)/libcrypter.so
 	$(CC) -o $@ -I$(INC) $< -L$(LIB) -lcrypter -lpthread
 
+test7: $(OBJ)/test7.o $(LIB)/libcrypter.so
+	$(CC) -o $@ -I$(INC) $< -L$(LIB) -lcrypter
+
 dma: $(BENCH_OBJ)/dma.o $(LIB)/libcrypter.so
 	$(CC) -o $@ -I$(INC) $< -L$(LIB) -lcrypter
 
