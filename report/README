@@ -17,3 +17,8 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/sarthak/CS614/CS614/A3/crypto_card
 cd drivers
 ./driver.sh
 ```
+
+## References
+1. https://olegkutkov.me/2021/01/07/writing-a-pci-device-driver-for-linux/
+2. ChatGPT
+3. https://docs.kernel.org/PCI/pci.html
