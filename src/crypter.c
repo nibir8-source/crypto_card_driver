@@ -13,33 +13,6 @@
 
 #define MB_1 1048576
 
-struct key_struct
-{
-  KEY_COMP a;
-  KEY_COMP b;
-  int pid;
-};
-
-struct data_struct
-{
-  uint64_t addr;
-  uint64_t length;
-  uint8_t isMapped;
-  int is_encrypt;
-};
-
-struct config_struct
-{
-  config_t type;
-  uint8_t value;
-};
-
-struct map_struct
-{
-  ADDR_PTR addr;
-  uint64_t size;
-};
-
 uint64_t mmap_size;
 int map_count = 0;
 uint64_t addr_start, addr_org;
@@ -142,7 +115,6 @@ int set_key(DEV_HANDLE cdev, KEY_COMP a, KEY_COMP b)
   struct key_struct k_struct;
   k_struct.a = a;
   k_struct.b = b;
-  k_struct.pid = getpid();
   // printf("In set_key userspace FD: %d %lu %d %d\n", cdev, IOCTL_SET_KEY, k_struct.a, k_struct.b);
   if (ioctl(cdev, IOCTL_SET_KEY, &k_struct) < 0)
   {
@@ -191,7 +163,7 @@ ADDR_PTR map_card(DEV_HANDLE cdev, uint64_t size)
     return addr;
   }
   
-  struct map_struct mp;
+  struct mmap_struct mp;
   mp.size = mmap_size = MB_1;
   if (ioctl(cdev, IOCTL_GET_ADDR, &mp) < 0)
   {

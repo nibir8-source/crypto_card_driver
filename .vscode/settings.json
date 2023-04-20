@@ -1,6 +1,7 @@
 {
     "files.associations": {
         "mman.h": "c",
-        "crypter.h": "c"
+        "crypter.h": "c",
+        "cryptocard_mod.h": "c"
     }
 }

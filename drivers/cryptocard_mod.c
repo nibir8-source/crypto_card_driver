@@ -41,49 +41,49 @@
 #define CRYPTOCARD_VENDOR_ID 0x1234
 #define CRYPTOCARD_DEVICE_ID 0xDEBA
 
-typedef void* ADDR_PTR;
-typedef int DEV_HANDLE;
-typedef unsigned char KEY_COMP;
+struct hash_node* hash_tbl[BUCKETS];
 
-#define MAX_PROC 4194304
+static inline int myhash(int pid){
+    return pid & (BUCKETS - 1);
+}
 
-struct proc_struct{
-    KEY_COMP a;
-    KEY_COMP b;
-    int is_dma;
-    int is_interrupt;
-    int key_set_flag;
-};
+static struct proc_struct* find(int pid){
+    int key;
+    struct hash_node *cur;
 
-struct proc_struct ps[MAX_PROC];
+    key = myhash(pid);
+    cur = hash_tbl[key];
+    if(cur == NULL){
+        return NULL;
+    }
+    while(cur != NULL){
+        if(cur->pid == pid){
+            return cur->data;
+        }
+        else{
+            cur = cur->next;
+        }
+    }
+    return NULL;
+}
+
+static void insert(int pid, struct proc_struct * pz){
+    int key;
+    struct hash_node * node;
+
+    key = myhash(pid);
+    node = (struct hash_node *)kzalloc(sizeof(struct hash_node), GFP_KERNEL);
+    node->data = pz;
+    node->pid = pid;
+    node->next = hash_tbl[key];
+    hash_tbl[key] = node;
+    return;
+}
 
 static int major;
 atomic_t  device_opened;
 static struct class *demo_class;
 struct device *demo_device;
-
-struct key_struct{
-  KEY_COMP a;
-  KEY_COMP b;
-  int pid;
-};
-
-struct data_struct{
-  uint64_t addr;
-  uint64_t length;
-  uint8_t isMapped;
-  int is_encrypt;
-};
-
-struct config_struct{
-  config_t type;
-  uint8_t value;
-};
-
-struct map_struct{
-  ADDR_PTR addr;
-  uint64_t size;
-};
 
 struct semaphore lock;
 
@@ -189,7 +189,7 @@ pte_t* return_pfn(struct mm_struct * mm, unsigned long addr){
 }
 
 
-static int do_mmio_enc_dec(struct data_struct *d_buff, ADDR_PTR addr, uint64_t length){
+static int do_mmio_enc_dec(struct data_struct *d_buff, ADDR_PTR addr, uint64_t length, struct proc_struct * node){
     int flag;
     char *buff = NULL;
     struct pci_dev *pdev = pci_get_device(CRYPTOCARD_VENDOR_ID, CRYPTOCARD_DEVICE_ID, NULL);
@@ -201,12 +201,12 @@ static int do_mmio_enc_dec(struct data_struct *d_buff, ADDR_PTR addr, uint64_t l
         return -1;
     }
     writel(length, drv_priv->hwmem + MMIO_MSG_LEN);
-    writel((ps[current->pid].is_interrupt? 128 : 0) | (d_buff->is_encrypt ? 0 : 2), drv_priv->hwmem + MMIO_STATUS);
+    writel((node->is_interrupt? 128 : 0) | (d_buff->is_encrypt ? 0 : 2), drv_priv->hwmem + MMIO_STATUS);
     for(int i = 0; i<length; i++){
         writeb(buff[length-1-i], drv_priv->hwmem + MMIO_UNUSED_OFFSET + i);
     }
     writeq(MMIO_UNUSED_OFFSET, drv_priv->hwmem + MMIO_DATA_ADDR);
-    if(ps[current->pid].is_interrupt){
+    if(node->is_interrupt){
         if(down_interruptible(&drv_priv->sem)){
             return -ERESTARTSYS;
         }
@@ -225,7 +225,7 @@ static int do_mmio_enc_dec(struct data_struct *d_buff, ADDR_PTR addr, uint64_t l
     return 0;
 }
 
-static int do_mmio_mapped(struct data_struct *d_buff, ADDR_PTR addr, uint64_t length){
+static int do_mmio_mapped(struct data_struct *d_buff, ADDR_PTR addr, uint64_t length, struct proc_struct * node){
     int flag;
     char *buff = NULL;
     struct pci_dev *pdev = pci_get_device(CRYPTOCARD_VENDOR_ID, CRYPTOCARD_DEVICE_ID, NULL);
@@ -240,9 +240,9 @@ static int do_mmio_mapped(struct data_struct *d_buff, ADDR_PTR addr, uint64_t le
     // printk("Buff Value Before: %s\n", buff);
     printk("Length: %lld, BAD: %lld \n", length, (unsigned long long)(addr) - base_addr);
     writel(length, drv_priv->hwmem + MMIO_MSG_LEN);
-    writel((ps[current->pid].is_interrupt? 128 : 0) | (d_buff->is_encrypt ? 0 : 2), drv_priv->hwmem + MMIO_STATUS);
+    writel((node->is_interrupt? 128 : 0) | (d_buff->is_encrypt ? 0 : 2), drv_priv->hwmem + MMIO_STATUS);
     writeq((unsigned long long)(addr) - base_addr, drv_priv->hwmem + MMIO_DATA_ADDR);
-    if(ps[current->pid].is_interrupt){
+    if(node->is_interrupt){
         if(down_interruptible(&drv_priv->sem)){
             return -ERESTARTSYS;
         }
@@ -260,7 +260,7 @@ static int do_mmio_mapped(struct data_struct *d_buff, ADDR_PTR addr, uint64_t le
     return 0;
 }
 
-static int do_dma_enc_dec(struct data_struct *d_buff, ADDR_PTR addr, uint64_t length){
+static int do_dma_enc_dec(struct data_struct *d_buff, ADDR_PTR addr, uint64_t length, struct proc_struct * node){
     int flag;
     struct pci_dev *pdev = pci_get_device(CRYPTOCARD_VENDOR_ID, CRYPTOCARD_DEVICE_ID, NULL);
     struct my_driver_priv *drv_priv = (struct my_driver_priv *) pci_get_drvdata(pdev);
@@ -271,8 +271,8 @@ static int do_dma_enc_dec(struct data_struct *d_buff, ADDR_PTR addr, uint64_t le
     }
     writeq(length, drv_priv->hwmem + DMA_MSG_LEN);
     writeq(drv_priv->dma_handle, drv_priv->hwmem + DMA_DATA_ADDR);
-    writeq((ps[current->pid].is_interrupt? 5 : 1) | (d_buff->is_encrypt ? 1 : 3), drv_priv->hwmem + DMA_STATUS);
-    if(ps[current->pid].is_interrupt){
+    writeq((node->is_interrupt? 5 : 1) | (d_buff->is_encrypt ? 1 : 3), drv_priv->hwmem + DMA_STATUS);
+    if(node->is_interrupt){
         if(down_interruptible(&drv_priv->sem)){
             return -ERESTARTSYS;
         }
@@ -301,7 +301,7 @@ long device_ioctl(struct file *file,
 	struct key_struct *k_buff = NULL;
     struct data_struct *d_buff = NULL;
     struct config_struct *cfg_buff = NULL;
-    struct map_struct *mp_buff = NULL;
+    struct mmap_struct *mp_buff = NULL;
     KEY_COMP a, b;
     ADDR_PTR addr;
     uint64_t length;
@@ -315,11 +315,26 @@ long device_ioctl(struct file *file,
     struct vm_area_struct *vma;
     pte_t *pte;
     pid_t pid = current->pid;
+    struct proc_struct* node, *pz;
     VMA_ITERATOR(vmi, current->mm, 0);
     // unsigned long long bt, ct, dt;
 	/*
 	 * Switch according to the ioctl called
 	 */
+    if(down_interruptible(&lock)){
+        return -ERESTARTSYS;
+    }
+    node = find(current->pid);
+    if(node == NULL){
+        pz = (struct proc_struct *)kzalloc(sizeof(struct proc_struct), GFP_KERNEL);
+        pz->a = 0;
+        pz->b = 0;
+        pz->is_dma = 0;
+        pz->is_interrupt = 0;
+        pz->key_set_flag = 0;
+        insert(current->pid, pz);
+    }
+    up(&lock);
 	switch (ioctl_num) {
         case IOCTL_SET_KEY:
             printk("Set key a and b %d\n", current->pid);
@@ -330,15 +345,15 @@ long device_ioctl(struct file *file,
             }
             a = k_buff->a;
             b = k_buff->b;
-            printk("PID: %d, %d, %d, KEY_PID: %d\n", current->pid, a, b, k_buff->pid);
+            // printk("PID: %d, %d, %d, KEY_PID: %d\n", current->pid, a, b, k_buff->pid);
             if(down_interruptible(&lock)){
                 printk("Down error\n");
                 return -ERESTARTSYS;
             }
-            pid = current->pid;
-            ps[pid].a = a;
-            ps[pid].b = b;
-            ps[pid].key_set_flag = 1;
+            node = find(current->pid);
+            node->a = a;
+            node->b = b;
+            node->key_set_flag = 1;
             
             printk("Lock held by %d\n", current->pid);
             writel((a<<8) | b, drv_priv->hwmem + OFF);
@@ -352,6 +367,7 @@ long device_ioctl(struct file *file,
                 printk("%d Down error\n", current->pid);
                 return -ERESTARTSYS;
             }
+            node = find(current->pid);
             printk("Start cryption %d\n", current->pid);
             d_buff = (struct data_struct*)vmalloc(sizeof(struct data_struct)) ;
             if(copy_from_user(d_buff,(char*)ioctl_param,sizeof(struct data_struct))){
@@ -363,14 +379,14 @@ long device_ioctl(struct file *file,
             length = d_buff->length;
             isMapped = d_buff->isMapped;
             pid = current->pid;
-            if(ps[pid].key_set_flag){
-                a = ps[pid].a;
-                b = ps[pid].b;
+            if(node->key_set_flag){
+                a = node->a;
+                b = node->b;
                 printk("PID: %d Key_set_flag %d, %d", pid, a, b);
                 writel((a<<8) | b, drv_priv->hwmem + OFF);
             }
-            if(ps[pid].is_dma){
-                if(do_dma_enc_dec(d_buff, addr, length)){
+            if(node->is_dma){
+                if(do_dma_enc_dec(d_buff, addr, length, node)){
                     pr_err("DMA encryption decryption failed\n");
                     vfree(d_buff);
                     up(&lock);
@@ -378,14 +394,14 @@ long device_ioctl(struct file *file,
                 }
             }else{
                 if(isMapped){
-                    if(do_mmio_mapped(d_buff, addr, length)){
+                    if(do_mmio_mapped(d_buff, addr, length, node)){
                         pr_err("User space MMIO encryption decryption failed\n");
                         vfree(d_buff);
                         up(&lock);
                         return -1;
                     }
                 }else{
-                    if(do_mmio_enc_dec(d_buff, addr, length)){
+                    if(do_mmio_enc_dec(d_buff, addr, length, node)){
                         pr_err("MMIO encryption decryption failed\n");
                         vfree(d_buff);
                         up(&lock);
@@ -407,25 +423,29 @@ long device_ioctl(struct file *file,
             }
             type = cfg_buff->type;
             value = cfg_buff->value;
-            if(type == INTERRUPT){
-                ps[pid].is_interrupt = value;
-            }else{
-                ps[pid].is_dma = value;
+            if(down_interruptible(&lock)){
+                return ERESTARTSYS;
             }
+            node = find(current->pid);
+            if(type == INTERRUPT){
+                node->is_interrupt = value;
+            }else{
+                node->is_dma = value;
+            }
+            up(&lock);
             printk("End config\n");
             vfree(cfg_buff);
             return ret;
         case IOCTL_GET_ADDR:
 
             printk("Start GET_ADDR \n");
-            mp_buff = (struct map_struct*)vmalloc(sizeof(struct map_struct)) ;
-            if(copy_from_user(mp_buff,(char*)ioctl_param,sizeof(struct map_struct))){
+            mp_buff = (struct mmap_struct*)vmalloc(sizeof(struct mmap_struct)) ;
+            if(copy_from_user(mp_buff,(char*)ioctl_param,sizeof(struct mmap_struct))){
                 pr_err("Copying key data for mapping from user failed\n");
                 return -1;
             }
             printk("Copy from user done\n");
            
-
             mmap_read_lock(current->mm);
             user_addr = 0;
             for_each_vma(vmi, vma){
@@ -438,7 +458,7 @@ long device_ioctl(struct file *file,
                 mp_buff->addr = (ADDR_PTR )user_addr;
             }
             
-            if(copy_to_user((char *)ioctl_param, mp_buff,sizeof(struct map_struct))){
+            if(copy_to_user((char *)ioctl_param, mp_buff,sizeof(struct mmap_struct))){
                 pr_err("Copying key data for mapping from user failed\n");
                 vfree(mp_buff);
                 return -1;
@@ -453,8 +473,8 @@ long device_ioctl(struct file *file,
             }
         case IOCTL_MAP_CARD:
             printk("Start map card\n");
-            mp_buff = (struct map_struct*)vmalloc(sizeof(struct map_struct)) ;
-            if(copy_from_user(mp_buff,(char*)ioctl_param,sizeof(struct map_struct))){
+            mp_buff = (struct mmap_struct*)vmalloc(sizeof(struct mmap_struct)) ;
+            if(copy_from_user(mp_buff,(char*)ioctl_param,sizeof(struct mmap_struct))){
                 pr_err("Copying key data for mapping from user failed\n");
                 return -1;
             }
@@ -486,18 +506,6 @@ long device_ioctl(struct file *file,
             mmap_write_unlock(current->mm);
             vfree(mp_buff);
             printk("End map card\n");
-            return ret;
-        case IOCTL_UNMAP_CARD:
-            printk("Start unmap card\n");
-            // mp_buff = (struct map_struct*)vmalloc(sizeof(struct map_struct)) ;
-            // if(copy_from_user(mp_buff,(char*)ioctl_param,sizeof(struct map_struct))){
-            //     pr_err("Copying key data for mapping from user failed\n");
-            //     return -1;
-            // }
-            // mmap_write_lock(current->mm);
-            // vm_munmap((unsigned long)mp_buff->addr, drv_priv->size);
-            // mmap_write_unlock(current->mm);
-            printk("End unmap card\n");
             return ret;
 	}
 	return ret;
@@ -543,9 +551,8 @@ static int __init mypci_driver_init(void)
     /* Register new PCI driver */
 
     int err;
-    for(int i = 0; i<MAX_PROC; i++){
-        ps[i].is_interrupt = ps[i].is_dma = 0;
-        ps[i].key_set_flag = 0;
+    for(int i = 0; i<BUCKETS; i++){
+        hash_tbl[i] = NULL;
     }
 
 	printk(KERN_INFO "Hello kernel\n");
@@ -587,10 +594,23 @@ error_regdev:
 static void __exit mypci_driver_exit(void)
 {
     /* Unregister */
+    struct hash_node * node, *next;
     device_destroy(demo_class, MKDEV(major, 0));
     class_destroy(demo_class);
     unregister_chrdev(major, DEVNAME);
     pci_unregister_driver(&my_driver);
+    for(int i = 0; i<BUCKETS; i++){
+        node = hash_tbl[i];
+        if(node == NULL){
+            continue;
+        }
+        while(node != NULL){
+            next = node->next;
+            kfree(node->data);
+            kfree(node);
+            node = next;
+        }
+    }
 	printk(KERN_INFO "Goodbye kernel\n");
 }
 
@@ -734,9 +754,9 @@ static void my_driver_remove(struct pci_dev *pdev)
 }
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("");
+MODULE_AUTHOR("Sarthak Rout");
 MODULE_DESCRIPTION("PCI driver");
-MODULE_VERSION("0.1");
+MODULE_VERSION("1.0");
 
 module_init(mypci_driver_init);
 module_exit(mypci_driver_exit);
