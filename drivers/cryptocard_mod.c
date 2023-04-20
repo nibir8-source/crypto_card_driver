@@ -37,6 +37,9 @@
 #define DMA_DATA_ADDR 144
 #define DMA_MSG_LEN 152
 #define DMA_STATUS 160
+#define INIT_INSERT 0
+#define KEY_INSERT 1
+#define CONFIG_INSERT 2
 
 #define CRYPTOCARD_VENDOR_ID 0x1234
 #define CRYPTOCARD_DEVICE_ID 0xDEBA
@@ -45,17 +48,89 @@ typedef void* ADDR_PTR;
 typedef int DEV_HANDLE;
 typedef unsigned char KEY_COMP;
 
-#define MAX_PROC 4194304
+#define MAX_BUCKETS 1000
 
 struct proc_struct{
     KEY_COMP a;
     KEY_COMP b;
-    int is_dma;
-    int is_interrupt;
-    int key_set_flag;
+    uint8_t is_dma;
+    uint8_t is_interrupt;
+    uint8_t key_set_flag;
 };
 
-struct proc_struct ps[MAX_PROC];
+struct node{
+    int pid;
+    struct proc_struct data;
+    struct node *next;
+};
+
+struct key_pair{
+    KEY_COMP a;
+    KEY_COMP b;
+};
+
+struct config_pair{
+    config_t type;
+    uint8_t val;
+};
+
+struct node *h_ps[MAX_BUCKETS];
+
+static int hash(int pid){
+    return pid % (MAX_BUCKETS);
+}
+
+
+static struct node *find(int pid){
+    int hid = hash(pid);
+    struct node *curr = h_ps[hid];
+    while(curr != NULL){
+        if(curr->pid == pid){
+            return (curr);
+        }
+        curr = curr->next;
+    }
+    return NULL;
+}
+
+
+static void insert(int flag, void *arg){
+    struct key_pair *kp = NULL;
+    struct config_pair *cfgp = NULL;
+    struct node *h_node = NULL;
+    struct node *curr = NULL;
+    int pid = current->pid;
+    int hid = hash(pid);
+    switch(flag){
+        case INIT_INSERT:
+            if(h_ps[hid] != NULL){
+                curr = h_ps[hid];
+            }
+            h_ps[hid] = (struct node *)vmalloc(sizeof(struct node));
+            h_ps[hid]->pid = pid;
+            h_ps[hid]->data.is_dma = h_ps[hid]->data.is_interrupt = h_ps[hid]->data.key_set_flag = 0;   
+            h_ps[hid]->next = curr;
+            break;
+        case KEY_INSERT:
+            kp = (struct key_pair *)arg;
+            h_node = find(pid);
+            h_node->data.a = kp->a;
+            h_node->data.b = kp->b;
+            h_node->data.key_set_flag = 1;
+            break;
+        case CONFIG_INSERT:
+            cfgp = (struct config_pair *)arg;
+            h_node = find(pid);
+            if(cfgp->type == INTERRUPT){
+                h_node->data.is_interrupt = cfgp->val;
+            }else{
+                h_node->data.is_dma = cfgp->val;
+            }
+            break;
+    }
+    return;
+}
+
 
 static int major;
 atomic_t  device_opened;
@@ -133,67 +208,12 @@ device_write(struct file *filp, const char *buff, size_t len, loff_t * off){
     return 8;
 }
 
-pte_t* return_pfn(struct mm_struct * mm, unsigned long addr){
-	// unsigned long * pgd,p4d,pud,pmd,ptep,pte;
-	pgd_t*pgd;
-	p4d_t* p4d;
-	pud_t* pud;
-	pmd_t * pmd;
-	pte_t * ptep;
-	pte_t pte;
-
-
-
-	pgd = pgd_offset(mm, addr);
-	if (pgd_none(*pgd) || pgd_bad(*pgd)){
-    printk("Invalid pgd");
-    return NULL;
-	}
-
-	p4d = p4d_offset(pgd, addr);
-	if (p4d_none(*p4d) || p4d_bad(*p4d)){
-		printk("Invalid p4d");
-		return NULL;
-	}
-
-	pud = pud_offset(p4d, addr);
-	if (pud_none(*pud) || pud_bad(*pud)){
-		printk("Invalid pud");
-		return NULL;
-	}
-
-	pmd = pmd_offset(pud, addr);
-	if (pmd_none(*pmd) || pmd_bad(*pmd)){
-		printk("Invalid pmd");
-		return NULL;
-	}
-
-
-	ptep = pte_offset_map(pmd, addr);
-	if (!ptep){
-		printk("Invalid ptep");
-		return NULL;
-	}
-
-	// printk("Ptep: %p\n",ptep);
-	 pte = *ptep;
-
-	if (pte_present(pte)){
-		
-		return ptep;
-		
-	}	
-
-	return NULL;
-
-}
-
-
 static int do_mmio_enc_dec(struct data_struct *d_buff, ADDR_PTR addr, uint64_t length){
     int flag;
     char *buff = NULL;
     struct pci_dev *pdev = pci_get_device(CRYPTOCARD_VENDOR_ID, CRYPTOCARD_DEVICE_ID, NULL);
     struct my_driver_priv *drv_priv = (struct my_driver_priv *) pci_get_drvdata(pdev);
+    struct proc_struct ps = find(current->pid)->data; 
     printk("Start MMIO\n");
     buff = (char *)vmalloc(length);
     if(copy_from_user(buff,(char *)addr,length)){
@@ -201,12 +221,12 @@ static int do_mmio_enc_dec(struct data_struct *d_buff, ADDR_PTR addr, uint64_t l
         return -1;
     }
     writel(length, drv_priv->hwmem + MMIO_MSG_LEN);
-    writel((ps[current->pid].is_interrupt? 128 : 0) | (d_buff->is_encrypt ? 0 : 2), drv_priv->hwmem + MMIO_STATUS);
+    writel((ps.is_interrupt? 128 : 0) | (d_buff->is_encrypt ? 0 : 2), drv_priv->hwmem + MMIO_STATUS);
     for(int i = 0; i<length; i++){
         writeb(buff[length-1-i], drv_priv->hwmem + MMIO_UNUSED_OFFSET + i);
     }
     writeq(MMIO_UNUSED_OFFSET, drv_priv->hwmem + MMIO_DATA_ADDR);
-    if(ps[current->pid].is_interrupt){
+    if(ps.is_interrupt){
         if(down_interruptible(&drv_priv->sem)){
             return -ERESTARTSYS;
         }
@@ -230,19 +250,13 @@ static int do_mmio_mapped(struct data_struct *d_buff, ADDR_PTR addr, uint64_t le
     char *buff = NULL;
     struct pci_dev *pdev = pci_get_device(CRYPTOCARD_VENDOR_ID, CRYPTOCARD_DEVICE_ID, NULL);
     struct my_driver_priv *drv_priv = (struct my_driver_priv *) pci_get_drvdata(pdev);
+    struct proc_struct ps = find(current->pid)->data; 
     buff = (char *)vmalloc(length);
-    // buff[0] = buff[1] ='a';
     printk("Start MMIO user space mapped at mapped addr %llx\n", (unsigned long long)addr);
-    for(int i = 0; i<length; i++){
-        buff[length-1-i] = readb(drv_priv->hwmem + (unsigned long long)(addr) - base_addr + i);
-        // printk("%c", buff[length-1-i]);
-    }
-    // printk("Buff Value Before: %s\n", buff);
-    printk("Length: %lld, BAD: %lld \n", length, (unsigned long long)(addr) - base_addr);
     writel(length, drv_priv->hwmem + MMIO_MSG_LEN);
-    writel((ps[current->pid].is_interrupt? 128 : 0) | (d_buff->is_encrypt ? 0 : 2), drv_priv->hwmem + MMIO_STATUS);
+    writel((ps.is_interrupt? 128 : 0) | (d_buff->is_encrypt ? 0 : 2), drv_priv->hwmem + MMIO_STATUS);
     writeq((unsigned long long)(addr) - base_addr, drv_priv->hwmem + MMIO_DATA_ADDR);
-    if(ps[current->pid].is_interrupt){
+    if(ps.is_interrupt){
         if(down_interruptible(&drv_priv->sem)){
             return -ERESTARTSYS;
         }
@@ -250,11 +264,6 @@ static int do_mmio_mapped(struct data_struct *d_buff, ADDR_PTR addr, uint64_t le
         flag = 1 | (d_buff->is_encrypt ? 0 : 2);
         while(readl(drv_priv->hwmem + MMIO_STATUS) == flag);
     }
-    for(int i = 0; i<length; i++){
-        buff[length-1-i] = readb(drv_priv->hwmem + (unsigned long long)(addr) - base_addr + i);
-        // printk("%c", buff[length-1-i]);
-    }
-    // printk("Buff Value After: %s\n", buff);
     printk("End MMIO user space mapped\n");
     vfree(buff);
     return 0;
@@ -264,6 +273,7 @@ static int do_dma_enc_dec(struct data_struct *d_buff, ADDR_PTR addr, uint64_t le
     int flag;
     struct pci_dev *pdev = pci_get_device(CRYPTOCARD_VENDOR_ID, CRYPTOCARD_DEVICE_ID, NULL);
     struct my_driver_priv *drv_priv = (struct my_driver_priv *) pci_get_drvdata(pdev);
+    struct proc_struct ps = find(current->pid)->data; 
     printk("%d Start DMA\n", current->pid);
     if(copy_from_user(drv_priv->dma_buffer,(char *)addr,length)){
         pr_err("Copying data from cryption from user failed\n");
@@ -271,8 +281,8 @@ static int do_dma_enc_dec(struct data_struct *d_buff, ADDR_PTR addr, uint64_t le
     }
     writeq(length, drv_priv->hwmem + DMA_MSG_LEN);
     writeq(drv_priv->dma_handle, drv_priv->hwmem + DMA_DATA_ADDR);
-    writeq((ps[current->pid].is_interrupt? 5 : 1) | (d_buff->is_encrypt ? 1 : 3), drv_priv->hwmem + DMA_STATUS);
-    if(ps[current->pid].is_interrupt){
+    writeq((ps.is_interrupt? 5 : 1) | (d_buff->is_encrypt ? 1 : 3), drv_priv->hwmem + DMA_STATUS);
+    if(ps.is_interrupt){
         if(down_interruptible(&drv_priv->sem)){
             return -ERESTARTSYS;
         }
@@ -289,6 +299,45 @@ static int do_dma_enc_dec(struct data_struct *d_buff, ADDR_PTR addr, uint64_t le
 }
 
 
+pte_t* return_pfn(struct mm_struct * mm, unsigned long addr){
+	// unsigned long * pgd,p4d,pud,pmd,ptep,pte;
+	pgd_t*pgd;
+	p4d_t* p4d;
+	pud_t* pud;
+	pmd_t * pmd;
+	pte_t * ptep;
+	pte_t pte;
+	pgd = pgd_offset(mm, addr);
+	if (pgd_none(*pgd) || pgd_bad(*pgd)){
+    printk("Invalid pgd");
+    return NULL;
+	}
+	p4d = p4d_offset(pgd, addr);
+	if (p4d_none(*p4d) || p4d_bad(*p4d)){
+		printk("Invalid p4d");
+		return NULL;
+	}
+	pud = pud_offset(p4d, addr);
+	if (pud_none(*pud) || pud_bad(*pud)){
+		printk("Invalid pud");
+		return NULL;
+	}
+	pmd = pmd_offset(pud, addr);
+	if (pmd_none(*pmd) || pmd_bad(*pmd)){
+		printk("Invalid pmd");
+		return NULL;
+	}
+	ptep = pte_offset_map(pmd, addr);
+	if (!ptep){
+		printk("Invalid ptep");
+		return NULL;
+	}
+	pte = *ptep;
+	if (pte_present(pte)){
+		return ptep;
+	}	
+	return NULL;
+}
 
 
 
@@ -308,18 +357,26 @@ long device_ioctl(struct file *file,
     uint8_t isMapped;
     struct pci_dev *pdev = pci_get_device(CRYPTOCARD_VENDOR_ID, CRYPTOCARD_DEVICE_ID, NULL);
     struct my_driver_priv *drv_priv = (struct my_driver_priv *) pci_get_drvdata(pdev);
-    config_t type;
-    uint8_t value;
     unsigned long pfn;
     unsigned long user_addr;
     struct vm_area_struct *vma;
     pte_t *pte;
     pid_t pid = current->pid;
+    struct node *curr;
+    struct config_pair cfgp;
+    struct proc_struct *ps;
+    struct key_pair kp;
     VMA_ITERATOR(vmi, current->mm, 0);
-    // unsigned long long bt, ct, dt;
-	/*
-	 * Switch according to the ioctl called
-	 */
+    if(down_interruptible(&lock)){
+        printk("%d Down error\n", current->pid);
+        return -ERESTARTSYS;
+    }
+    if(find(current->pid) == NULL){
+        insert(INIT_INSERT, NULL);
+    }
+    curr = find(pid);
+    ps = &curr->data;
+    up(&lock);
 	switch (ioctl_num) {
         case IOCTL_SET_KEY:
             printk("Set key a and b %d\n", current->pid);
@@ -328,18 +385,14 @@ long device_ioctl(struct file *file,
                 pr_err("Copying key a and b from user failed\n");
                 return ret;
             }
-            a = k_buff->a;
-            b = k_buff->b;
-            printk("PID: %d, %d, %d, KEY_PID: %d\n", current->pid, a, b, k_buff->pid);
+            a = kp.a = k_buff->a;
+            b = kp.b = k_buff->b;
+            printk("PID: %d, %d, %d, KEY_PID: %d\n", current->pid, kp.a, kp.b, k_buff->pid);
             if(down_interruptible(&lock)){
                 printk("Down error\n");
                 return -ERESTARTSYS;
             }
-            pid = current->pid;
-            ps[pid].a = a;
-            ps[pid].b = b;
-            ps[pid].key_set_flag = 1;
-            
+            insert(KEY_INSERT, &kp);
             printk("Lock held by %d\n", current->pid);
             writel((a<<8) | b, drv_priv->hwmem + OFF);
             printk("Key writing finished for %d\n", current->pid);
@@ -363,13 +416,13 @@ long device_ioctl(struct file *file,
             length = d_buff->length;
             isMapped = d_buff->isMapped;
             pid = current->pid;
-            if(ps[pid].key_set_flag){
-                a = ps[pid].a;
-                b = ps[pid].b;
+            if(ps->key_set_flag){
+                a = ps->a;
+                b = ps->b;
                 printk("PID: %d Key_set_flag %d, %d", pid, a, b);
                 writel((a<<8) | b, drv_priv->hwmem + OFF);
             }
-            if(ps[pid].is_dma){
+            if(ps->is_dma){
                 if(do_dma_enc_dec(d_buff, addr, length)){
                     pr_err("DMA encryption decryption failed\n");
                     vfree(d_buff);
@@ -394,7 +447,6 @@ long device_ioctl(struct file *file,
                 }
             }
             printk("End cryption");
-            // print_data(addr, length);
             vfree(d_buff);
             up(&lock);
             return ret;
@@ -405,13 +457,14 @@ long device_ioctl(struct file *file,
                 pr_err("Copying key data from encryption from user failed\n");
                 return -1;
             }
-            type = cfg_buff->type;
-            value = cfg_buff->value;
-            if(type == INTERRUPT){
-                ps[pid].is_interrupt = value;
-            }else{
-                ps[pid].is_dma = value;
+            cfgp.type = cfg_buff->type;
+            cfgp.val = cfg_buff->value;
+            if(down_interruptible(&lock)){
+                printk("Down error\n");
+                return -ERESTARTSYS;
             }
+            insert(CONFIG_INSERT, &cfgp);
+            up(&lock);
             printk("End config\n");
             vfree(cfg_buff);
             return ret;
@@ -489,14 +542,6 @@ long device_ioctl(struct file *file,
             return ret;
         case IOCTL_UNMAP_CARD:
             printk("Start unmap card\n");
-            // mp_buff = (struct map_struct*)vmalloc(sizeof(struct map_struct)) ;
-            // if(copy_from_user(mp_buff,(char*)ioctl_param,sizeof(struct map_struct))){
-            //     pr_err("Copying key data for mapping from user failed\n");
-            //     return -1;
-            // }
-            // mmap_write_lock(current->mm);
-            // vm_munmap((unsigned long)mp_buff->addr, drv_priv->size);
-            // mmap_write_unlock(current->mm);
             printk("End unmap card\n");
             return ret;
 	}
@@ -529,7 +574,6 @@ MODULE_DEVICE_TABLE(pci, my_driver_id_table);
 static int my_driver_probe(struct pci_dev *pdev, const struct pci_device_id *ent);
 static void my_driver_remove(struct pci_dev *pdev);
 
-/* Driver registration structure */
 static struct pci_driver my_driver = {
     .name = MY_DRIVER,
     .id_table = my_driver_id_table,
@@ -540,13 +584,8 @@ static struct pci_driver my_driver = {
 
 static int __init mypci_driver_init(void)
 {
-    /* Register new PCI driver */
 
     int err;
-    for(int i = 0; i<MAX_PROC; i++){
-        ps[i].is_interrupt = ps[i].is_dma = 0;
-        ps[i].key_set_flag = 0;
-    }
 
 	printk(KERN_INFO "Hello kernel\n");
             
@@ -606,12 +645,11 @@ static irqreturn_t my_interrupt_handler(int irq, void * dev_id){
     struct pci_dev *pdev = pci_get_device(CRYPTOCARD_VENDOR_ID, CRYPTOCARD_DEVICE_ID, NULL);
     struct my_driver_priv *drv_priv = (struct my_driver_priv *) pci_get_drvdata(pdev);
     u32 isr;
-    // printk("In interrupt handler, %d\n", current->pid);
-
+    printk("In interrupt handler\n");
     isr = readl(drv_priv->hwmem + ISR_OFFSET);
     writel(isr, drv_priv->hwmem + ACK_OFFSET);
     up(&drv_priv->sem);
-    // printk("Interrupt handled\n");
+    printk("End interrupt handler\n");
     return IRQ_HANDLED;
 }
 
@@ -619,28 +657,17 @@ static irqreturn_t my_interrupt_handler(int irq, void * dev_id){
 static int my_driver_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
     int bar, err;
-    u16 vendor, device;
     unsigned long mmio_start,mmio_len;
     struct my_driver_priv *drv_priv;
 
-    /* Let's read data from the PCI device configuration registers */
-    pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor);
-    pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
-
-    printk(KERN_INFO "Device vid: 0x%X pid: 0x%X\n", vendor, device);
-    
-
-    /* Request IO BAR */
     bar = pci_select_bars(pdev, IORESOURCE_MEM);
 
-    /* Enable device memory */
     err = pci_enable_device_mem(pdev);
 
     if (err) {
         return err;
     }
 
-    /* Request memory region for the BAR */
     err = pci_request_region(pdev, bar, MY_DRIVER);
 
     if (err) {
@@ -648,11 +675,9 @@ static int my_driver_probe(struct pci_dev *pdev, const struct pci_device_id *ent
         return err;
     }
 
-    /* Get start and stop memory offsets */
     mmio_start = pci_resource_start(pdev, 0);
     mmio_len = pci_resource_len(pdev, 0);
 
-    /* Allocate memory for the driver private data */
     drv_priv = kzalloc(sizeof(struct my_driver_priv), GFP_KERNEL);
 
     if (!drv_priv) {
@@ -662,9 +687,6 @@ static int my_driver_probe(struct pci_dev *pdev, const struct pci_device_id *ent
     sema_init(&drv_priv->sem, 0);
     sema_init(&lock, 1);
 
-    /* Remap BAR to the local pointer */
-    // drv_priv->buffer_size = DMA_BUFFER_SIZE;
-    // drv_priv->dma_buffer = dma_alloc_coherent(&pdev->dev, drv_priv->buffer_size, dma_handle, GFP_KERNEL | GFP_ATOMIC);
     drv_priv->hwmem = ioremap(mmio_start, mmio_len);
     printk("Pointer base %lu\n", (unsigned long)drv_priv->hwmem);
 
@@ -686,7 +708,6 @@ static int my_driver_probe(struct pci_dev *pdev, const struct pci_device_id *ent
         goto error;
     }
 
-    printk("DMA buffer phys: %llx, DMA Handle: %llx\n", virt_to_phys(drv_priv->dma_buffer), drv_priv->dma_handle);
 
     err = request_irq(pdev->irq, my_interrupt_handler, IRQF_SHARED, "my_pci_device", pdev);
     if(err){
@@ -695,14 +716,7 @@ static int my_driver_probe(struct pci_dev *pdev, const struct pci_device_id *ent
         goto error;
     }
 
-
-
-    /* Set driver private data */
-    /* Now we can access mapped "hwmem" from the any driver's function */
     pci_set_drvdata(pdev, drv_priv);
-
-    // write_sample_data(pdev);
-
     return 0;
 error:
     if(drv_priv->dma_buffer){
@@ -734,7 +748,7 @@ static void my_driver_remove(struct pci_dev *pdev)
 }
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("");
+MODULE_AUTHOR("Nibir Baruah");
 MODULE_DESCRIPTION("PCI driver");
 MODULE_VERSION("0.1");
 
