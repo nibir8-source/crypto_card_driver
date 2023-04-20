@@ -191,7 +191,7 @@ void unmap_card(DEV_HANDLE cdev, ADDR_PTR addr)
     used_count = 0;
     munmap((void *)addr_base, ONE_MB);
   }
-  else{
+  else if(used_count > 1){
     used_count--;
   }
 }
