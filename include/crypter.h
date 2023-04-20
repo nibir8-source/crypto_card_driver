@@ -48,4 +48,78 @@ ADDR_PTR map_card(DEV_HANDLE cdev, uint64_t size);
 
 void unmap_card(DEV_HANDLE cdev, ADDR_PTR addr);
 
+
+// Extra Definitions 
+typedef unsigned long long ull;
+typedef unsigned long ul;
+typedef unsigned char uc;
+
+
+#define ONE_MB 1024*1024
+#define OFFSET 168
+
+struct key
+{
+  KEY_COMP a;
+  KEY_COMP b;
+  pid_t pid;
+};
+
+void initialise_key(struct key *temp, KEY_COMP a, KEY_COMP b, pid_t pid)
+{
+    temp->a =  a;
+    temp->b = b;
+    temp->pid = pid;
+
+}
+
+struct data
+{
+  ul addr;
+  ul length;
+  uc isMapped;
+  int is_encrypt;
+};
+
+void initialise_data(struct data * temp, ul addr, ul length, uc isMapped, int is_encrypt){
+    temp->addr =addr;
+    temp->length = length;
+    temp->isMapped = isMapped;
+    temp->is_encrypt = is_encrypt;
+}
+
+struct config
+{
+  config_t type;
+  uc value;
+};
+
+void initialise_config(struct config * temp, config_t type, uc value){
+    temp->type = type;
+    temp->value = value;
+
+}
+
+struct map
+{
+  ADDR_PTR addr;
+  ul size;
+};
+
+
+void initialise_map(struct map *temp, ADDR_PTR addr, ul size){
+    temp->addr= addr;
+    temp->size=size;
+}
+
+void initialise_half_map(struct map *temp,ul size){
+    temp->size=size;
+}
+
+
+
+ul mmap_size;
+ul map_count = 0;
+ul addr_start, addr_org;
+
 #endif
