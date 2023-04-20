@@ -1,4 +1,5 @@
-obj-m = cryptocard_mod.o
+obj-m := cryptocard_mod.o
+cryptocard_mod-y := main.o hashtbl.o
 
 KVERSION = $(shell uname -r)
 

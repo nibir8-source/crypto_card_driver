@@ -6,9 +6,9 @@
 int main()
 {
   DEV_HANDLE cdev;
-  char *msg = "Adit CS614!";
+  char *msg = "Hello World!23";
   char op_text[16];
-  KEY_COMP a=30, b=17;
+  KEY_COMP a=2, b=23;
   uint64_t size = strlen(msg);
   strcpy(op_text, msg);
   cdev = create_handle();
@@ -23,6 +23,11 @@ int main()
     printf("Unable to set key\n");
     exit(0);
   }
+
+    if(set_config(cdev, DMA, 1) == ERROR){
+        printf("Unable to set interrupt\n");
+        exit(0);
+    }
 
     if(set_config(cdev, INTERRUPT, 1) == ERROR){
         printf("Unable to set interrupt\n");

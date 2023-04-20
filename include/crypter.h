@@ -19,8 +19,10 @@ typedef unsigned char KEY_COMP;
 #define TRUE 1
 #define FALSE 0
 #define ERROR -1
-
+#define UNUSED_OFF 168
 #define MAJOR_NUM 100
+#define ENCRYPT 1
+#define DECRYPT 0
 
 
 #define IOCTL_SET_KEY _IOWR(MAJOR_NUM, 0, char*)

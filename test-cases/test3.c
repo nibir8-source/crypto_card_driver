@@ -3,36 +3,35 @@
 #include <stdio.h>
 #include <crypter.h>
 
+#define ONE_MB 1048576
+
 int main()
 {
   DEV_HANDLE cdev;
-  char *msg = "Adit CS614!";
+  char *msg = "Hello World!23";
   char op_text[16];
-  KEY_COMP a=2, b=23;
+  KEY_COMP a=40, b=17;
   uint64_t size = strlen(msg);
   strcpy(op_text, msg);
   cdev = create_handle();
+
 
   if(cdev == ERROR)
   {
     printf("Unable to create handle for device\n");
     exit(0);
   }
-
+  
   if(set_key(cdev, a, b) == ERROR){
     printf("Unable to set key\n");
     exit(0);
   }
 
-    if(set_config(cdev, DMA, 1) == ERROR){
-        printf("Unable to set interrupt\n");
-        exit(0);
-    }
-
-    if(set_config(cdev, INTERRUPT, 1) == ERROR){
-        printf("Unable to set interrupt\n");
-        exit(0);
-    }
+  ADDR_PTR usr_addr = map_card(cdev, ONE_MB);
+  if(usr_addr == NULL){
+    printf("Unable to map device mem to user space\n");
+    exit(0);
+  }
 
   printf("Original Text: %s\n", msg);
 
@@ -42,6 +41,7 @@ int main()
   decrypt(cdev, op_text, size, 0);
   printf("Decrypted Text: %s\n", op_text);
 
+  unmap_card(cdev, usr_addr);
   close_handle(cdev);
   return 0;
 }

@@ -11,14 +11,10 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 
-#define MB_1 1048576
-
-uint64_t mmap_size;
-int map_count = 0;
-uint64_t addr_start, addr_org;
-
 /*Function template to create handle for the CryptoCard device.
 On success it returns the device handle as an integer*/
+int used_count = 0;
+
 DEV_HANDLE create_handle()
 {
   DEV_HANDLE fd = open("/dev/chardev", O_RDWR);
@@ -26,7 +22,7 @@ DEV_HANDLE create_handle()
   {
     return ERROR;
   }
-  map_count = 0;
+  used_count = 0;
   return fd;
 }
 
@@ -44,25 +40,28 @@ Takes four arguments
   length: size of data to be encrypt
   isMapped: TRUE if addr is memory-mapped address otherwise FALSE
 */
-#define KB_512 512 * 1024
+#define HALF_MB 512 * 1024
 
-int enc_dec(DEV_HANDLE cdev, unsigned long long addr, uint64_t length, uint8_t isMapped, int is_encrypt){
-  
+int helper(DEV_HANDLE cdev, unsigned long long addr, uint64_t length, uint8_t isMapped, int is_encrypt)
+{
+
   struct data_struct d_struct;
   uint64_t start = addr;
-  while(start + KB_512 <= addr + length){
+  while (start + HALF_MB <= addr + length)
+  {
     d_struct.addr = (uint64_t)(start);
-    d_struct.length = KB_512;
+    d_struct.length = HALF_MB;
     d_struct.isMapped = isMapped;
     d_struct.is_encrypt = is_encrypt;
-    // printf("Encrypting data at %llu, LEN: %lu, %d\n", start, KB_512, isMapped);
+    // printf("Encrypting data at %llu, LEN: %lu, %d\n", start, HALF_MB, isMapped);
     if (ioctl(cdev, IOCTL_ENC_DEC, &d_struct) < 0)
     {
       return ERROR;
     }
-    start += KB_512;
+    start += HALF_MB;
   }
-  if(start < addr + length){
+  if (start < addr + length)
+  {
     d_struct.addr = (uint64_t)(start);
     d_struct.length = addr + length - start;
     d_struct.isMapped = isMapped;
@@ -74,17 +73,11 @@ int enc_dec(DEV_HANDLE cdev, unsigned long long addr, uint64_t length, uint8_t i
     }
   }
   return 0;
-
 }
 
 int encrypt(DEV_HANDLE cdev, ADDR_PTR addr, uint64_t length, uint8_t isMapped)
 {
-  if(enc_dec(cdev, (unsigned long long)addr, length, isMapped, 1)<0){
-    return -1;
-  }
-  else{
-    return 0;
-  }
+  return helper(cdev, (unsigned long long)addr, length, isMapped, ENCRYPT);
 }
 
 /*Function template to decrypt a message using MMIO/DMA/Memory-mapped.
@@ -96,12 +89,7 @@ Takes four arguments
 */
 int decrypt(DEV_HANDLE cdev, ADDR_PTR addr, uint64_t length, uint8_t isMapped)
 {
-  if(enc_dec(cdev, (unsigned long long)addr, length, isMapped, 0)<0){
-    return -1;
-  }
-  else{
-    return 0;
-  }
+  return helper(cdev, (unsigned long long)addr, length, isMapped, DECRYPT);
 }
 
 /*Function template to set the key pair.
@@ -141,6 +129,9 @@ int set_config(DEV_HANDLE cdev, config_t type, uint8_t value)
   return 0;
 }
 
+#define ONE_MB 1024 * 1024
+uint64_t addr_offset, addr_base;
+
 /*Function template to device input/output memory into user space.
 Takes three arguments
   cdev: opened device handle
@@ -148,44 +139,46 @@ Takes three arguments
 Return virtual address of the mapped memory*/
 ADDR_PTR map_card(DEV_HANDLE cdev, uint64_t size)
 {
-  if (size > MB_1)
+  if (size + UNUSED_OFF > ONE_MB)
   {
-    printf("Size more than 1 MB\n");
+    printf("Requested + Used size more than 1 MB\n");
     return NULL;
   }
-  if(size%4){
-    size += 4 - (size % 4);
-  }
-  if(map_count != 0){
-    ADDR_PTR addr = (ADDR_PTR)addr_start;
-    map_count++;
-    addr_start += size;
+  // Pad size
+  size += (4 - (size % 4)) * ((size % 4) != 0);
+  if (used_count != 0)
+  {
+    ADDR_PTR addr = (ADDR_PTR)addr_offset;
+    used_count++;
+    addr_offset += size;
     return addr;
   }
-  
-  struct mmap_struct mp;
-  mp.size = mmap_size = MB_1;
-  if (ioctl(cdev, IOCTL_GET_ADDR, &mp) < 0)
+  else
   {
-    printf("Unable to get address\n");
-    return NULL;
+    struct mmap_struct mp;
+    mp.size = ONE_MB;
+    if (ioctl(cdev, IOCTL_GET_ADDR, &mp) < 0)
+    {
+      printf("Unable to get userspace virtual address\n");
+      return NULL;
+    }
+    // Do fixed mmap at that address
+    ADDR_PTR addr = mmap(mp.addr, mp.size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, 0, 0);
+    if (addr != mp.addr)
+    {
+      printf("Unable to do mmap at fixed address\n");
+      return NULL;
+    }
+    if (ioctl(cdev, IOCTL_MAP_CARD, &mp) < 0)
+    {
+      printf("Unable to do ioctl map card\n");
+      return NULL;
+    }
+    used_count++;
+    addr_offset = (uint64_t)mp.addr + UNUSED_OFF + size;
+    addr_base = (uint64_t)mp.addr;
+    return (mp.addr + UNUSED_OFF);
   }
-  // printf("User addr: %p\n", mp.addr);
-  ADDR_PTR addr = mmap(mp.addr, mp.size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, 0, 0);
-  if (addr != mp.addr)
-  {
-    printf("Unable to do mmap\n");
-    return NULL;
-  }
-  if (ioctl(cdev, IOCTL_MAP_CARD, &mp) < 0)
-  {
-    printf("Unable to do ioctl_map_card\n");
-    return NULL;
-  }
-  map_count++;
-  addr_start = mp.addr + 168 + size;
-  addr_org = mp.addr;
-  return (mp.addr + 168);
 }
 
 /*Function template to device input/output memory into user space.
@@ -194,10 +187,11 @@ Takes three arguments
   addr: memory-mapped address to unmap from user-space*/
 void unmap_card(DEV_HANDLE cdev, ADDR_PTR addr)
 {
-  if(map_count > 0){
-    map_count--;
+  if(used_count == 1){
+    used_count = 0;
+    munmap((void *)addr_base, ONE_MB);
   }
-  if(map_count == 0){
-    munmap(addr_org, MB_1);
+  else{
+    used_count--;
   }
 }

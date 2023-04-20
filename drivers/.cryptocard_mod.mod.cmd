@@ -1,1 +1,0 @@
-cmd_/home/sarthak/crypto_card_driver/drivers/cryptocard_mod.mod := printf '%s\n'   cryptocard_mod.o | awk '!x[$$0]++ { print("/home/sarthak/crypto_card_driver/drivers/"$$0) }' > /home/sarthak/crypto_card_driver/drivers/cryptocard_mod.mod

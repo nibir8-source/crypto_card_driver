@@ -1,1 +1,0 @@
-cmd_/home/sarthak/crypto_card_driver/drivers/cryptocard_mod.ko := ld -r  -m elf_x86_64 -z noexecstack   --build-id=sha1  -T scripts/module.lds -o /home/sarthak/crypto_card_driver/drivers/cryptocard_mod.ko /home/sarthak/crypto_card_driver/drivers/cryptocard_mod.o /home/sarthak/crypto_card_driver/drivers/cryptocard_mod.mod.o;  true

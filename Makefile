@@ -25,7 +25,7 @@ create-dev: $(BENCH_SRC)/file_create.c
 	$(CC) -o $@ $<
 
 test1: $(OBJ)/test1.o $(LIB)/libcrypter.so
-	$(CC) -o $@ -I$(INC) $< -L$(LIB) -lcrypter -lpthread
+	$(CC) -o $@ -I$(INC) $< -L$(LIB) -lcrypter
 
 test2: $(OBJ)/test2.o $(LIB)/libcrypter.so
 	$(CC) -o $@ -I$(INC) $< -L$(LIB) -lcrypter
@@ -40,7 +40,7 @@ test5: $(OBJ)/test5.o $(LIB)/libcrypter.so
 	$(CC) -o $@ -I$(INC) $< -L$(LIB) -lcrypter
 
 test6: $(OBJ)/test6.o $(LIB)/libcrypter.so
-	$(CC) -o $@ -I$(INC) $< -L$(LIB) -lcrypter
+	$(CC) -o $@ -I$(INC) $< -L$(LIB) -lcrypter -lpthread
 
 dma: $(BENCH_OBJ)/dma.o $(LIB)/libcrypter.so
 	$(CC) -o $@ -I$(INC) $< -L$(LIB) -lcrypter
