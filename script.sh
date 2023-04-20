@@ -1,2 +1,2 @@
 #!/bin/bash
-cd drivers && ./script.sh && cd .. && make test1 && ./test1
+cd drivers && ./script.sh && cd .. && make clean && make && time ./mmap_interrupt

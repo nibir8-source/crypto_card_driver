@@ -237,7 +237,7 @@ static int do_mmio_mapped(struct data_struct *d_buff, ADDR_PTR addr, uint64_t le
         buff[length-1-i] = readb(drv_priv->hwmem + (unsigned long long)(addr) - base_addr + i);
         // printk("%c", buff[length-1-i]);
     }
-    printk("Buff Value Before: %s\n", buff);
+    // printk("Buff Value Before: %s\n", buff);
     printk("Length: %lld, BAD: %lld \n", length, (unsigned long long)(addr) - base_addr);
     writel(length, drv_priv->hwmem + MMIO_MSG_LEN);
     writel((ps[current->pid].is_interrupt? 128 : 0) | (d_buff->is_encrypt ? 0 : 2), drv_priv->hwmem + MMIO_STATUS);
@@ -254,7 +254,7 @@ static int do_mmio_mapped(struct data_struct *d_buff, ADDR_PTR addr, uint64_t le
         buff[length-1-i] = readb(drv_priv->hwmem + (unsigned long long)(addr) - base_addr + i);
         // printk("%c", buff[length-1-i]);
     }
-    printk("Buff Value After: %s\n", buff);
+    // printk("Buff Value After: %s\n", buff);
     printk("End MMIO user space mapped\n");
     vfree(buff);
     return 0;
@@ -330,8 +330,9 @@ long device_ioctl(struct file *file,
             }
             a = k_buff->a;
             b = k_buff->b;
-            printk("PID: %d, %d, %d, KEY_PID: %d", current->pid, a, b, k_buff->pid);
+            printk("PID: %d, %d, %d, KEY_PID: %d\n", current->pid, a, b, k_buff->pid);
             if(down_interruptible(&lock)){
+                printk("Down error\n");
                 return -ERESTARTSYS;
             }
             pid = current->pid;
@@ -339,7 +340,7 @@ long device_ioctl(struct file *file,
             ps[pid].b = b;
             ps[pid].key_set_flag = 1;
             
-            printk("Lock held by %d", current->pid);
+            printk("Lock held by %d\n", current->pid);
             writel((a<<8) | b, drv_priv->hwmem + OFF);
             printk("Key writing finished for %d\n", current->pid);
             up(&lock);
@@ -733,8 +734,8 @@ static void my_driver_remove(struct pci_dev *pdev)
 }
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Nibir Baruah <contact@nibir@iitk.ac.in>");
-MODULE_DESCRIPTION("Test PCI driver");
+MODULE_AUTHOR("");
+MODULE_DESCRIPTION("PCI driver");
 MODULE_VERSION("0.1");
 
 module_init(mypci_driver_init);
