@@ -143,7 +143,7 @@ int set_key(DEV_HANDLE cdev, KEY_COMP a, KEY_COMP b)
   k_struct.a = a;
   k_struct.b = b;
   k_struct.pid = getpid();
-  printf("In set_key userspace FD: %d %lu %d %d\n", cdev, IOCTL_SET_KEY, k_struct.a, k_struct.b);
+  // printf("In set_key userspace FD: %d %lu %d %d\n", cdev, IOCTL_SET_KEY, k_struct.a, k_struct.b);
   if (ioctl(cdev, IOCTL_SET_KEY, &k_struct) < 0)
   {
     return ERROR;

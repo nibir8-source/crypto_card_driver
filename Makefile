@@ -85,4 +85,4 @@ prepare-submit: $(RNO)-pa-cs614.tar.gz
 
 .PHONY: clean
 clean:
-	rm -rf test1 create-dev dma dma_interrupt mmap mmap_interrupt mmio mmio_interrupt $(OBJ) $(LIB) $(BENCH_OBJ)
+	rm -rf test1 test2 test3 test4 test5 test6 create-dev dma dma_interrupt mmap mmap_interrupt mmio mmio_interrupt $(OBJ) $(LIB) $(BENCH_OBJ)
