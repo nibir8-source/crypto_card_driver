@@ -1,1 +1,19 @@
-# Place your report here
+# PCI Device Driver
+
+We write userspace library and kernel module for the CryptoCard to encrypt/decrypt a string when passed to the device along with the keys. 
+
+## How to use
+Checkout `include/crypter.h` in which available functions are listed. 
+
+## How to run
+- Run make
+- Export the path to libcrypter.so directory
+```bash
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/sarthak/CS614/CS614/A3/crypto_card_driver/lib
+```
+- To test `test1.c`, Edit `run.sh` and write `make test1` and `./test1`. Then, run `./run.sh`
+- Alternatively, to create the kernel module and load it, 
+```bash
+cd drivers
+./driver.sh
+```
