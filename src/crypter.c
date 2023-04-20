@@ -82,7 +82,6 @@ int enc_dec(DEV_HANDLE cdev, unsigned long long addr, uint64_t length, uint8_t i
     d_struct.length = KB_512;
     d_struct.isMapped = isMapped;
     d_struct.is_encrypt = is_encrypt;
-    // printf("Encrypting data at %llu, LEN: %lu, %d\n", start, KB_512, isMapped);
     if (ioctl(cdev, IOCTL_ENC_DEC, &d_struct) < 0)
     {
       return ERROR;
@@ -94,7 +93,6 @@ int enc_dec(DEV_HANDLE cdev, unsigned long long addr, uint64_t length, uint8_t i
     d_struct.length = addr + length - start;
     d_struct.isMapped = isMapped;
     d_struct.is_encrypt = is_encrypt;
-    // printf("Encrypting data at %llu, LEN: %lu, %d\n", start, d_struct.length, isMapped);
     if (ioctl(cdev, IOCTL_ENC_DEC, &d_struct) < 0)
     {
       return ERROR;
@@ -143,7 +141,6 @@ int set_key(DEV_HANDLE cdev, KEY_COMP a, KEY_COMP b)
   k_struct.a = a;
   k_struct.b = b;
   k_struct.pid = getpid();
-  printf("In set_key userspace FD: %d %lu %d %d\n", cdev, IOCTL_SET_KEY, k_struct.a, k_struct.b);
   if (ioctl(cdev, IOCTL_SET_KEY, &k_struct) < 0)
   {
     return ERROR;
@@ -198,7 +195,7 @@ ADDR_PTR map_card(DEV_HANDLE cdev, uint64_t size)
     printf("Unable to get address\n");
     return NULL;
   }
-  // printf("User addr: %p\n", mp.addr);
+
   ADDR_PTR addr = mmap(mp.addr, mp.size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, 0, 0);
   if (addr != mp.addr)
   {
@@ -211,8 +208,8 @@ ADDR_PTR map_card(DEV_HANDLE cdev, uint64_t size)
     return NULL;
   }
   map_count++;
-  addr_start = mp.addr + 168 + size;
-  addr_org = mp.addr;
+  addr_start = (unsigned long long)mp.addr + 168 + size;
+  addr_org = (unsigned long long)mp.addr;
   return (mp.addr + 168);
 }
 
@@ -226,6 +223,6 @@ void unmap_card(DEV_HANDLE cdev, ADDR_PTR addr)
     map_count--;
   }
   if(map_count == 0){
-    munmap(addr_org, MB_1);
+    munmap((ADDR_PTR)addr_org, MB_1);
   }
 }
