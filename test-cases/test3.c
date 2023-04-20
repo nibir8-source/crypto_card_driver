@@ -8,7 +8,7 @@ int main()
   DEV_HANDLE cdev;
   char *msg = "Adit CS614!";
   char op_text[16];
-  KEY_COMP a=30, b=17;
+  KEY_COMP a=2, b=23;
   uint64_t size = strlen(msg);
   strcpy(op_text, msg);
   cdev = create_handle();

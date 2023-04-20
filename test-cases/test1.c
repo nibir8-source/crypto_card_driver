@@ -26,6 +26,14 @@ void* thread_function(void* arg)
   char op_text[size + 3];
   strcpy(op_text, msg);
 
+  cdev = create_handle();
+
+  if(cdev == ERROR)
+  {
+    printf("Unable to create handle for device\n");
+    exit(0);
+  }
+
   if(set_key(cdev, a, b) == ERROR){
     printf("Unable to set key\n");
     exit(0);
@@ -48,6 +56,9 @@ void* thread_function(void* arg)
 
   decrypt(cdev, op_text, size, 0);
   printf("%d Decrypted Text: %s\n", tid, op_text);
+  
+  close_handle(cdev);
+
 }
 
 int main()
@@ -63,15 +74,7 @@ int main()
   t1.tid = 0;
   t2.tid = 1;
   t3.tid = 2;
-  cdev = create_handle();
 
-  if(cdev == ERROR)
-  {
-    printf("Unable to create handle for device\n");
-    exit(0);
-  }
-
-  t1.cdev = t2.cdev = t3.cdev = cdev;
   pthread_t my_thread[3];
 
   if(pthread_create(&my_thread[0], NULL, thread_function, &t1) != 0) {
@@ -93,6 +96,5 @@ int main()
   pthread_join(my_thread[1], NULL);
   pthread_join(my_thread[2], NULL);
 
-  close_handle(cdev);
   return 0;
 }

@@ -17,6 +17,7 @@ struct key_struct
 {
   KEY_COMP a;
   KEY_COMP b;
+  int pid;
 };
 
 struct data_struct
@@ -39,7 +40,6 @@ struct map_struct
   uint64_t size;
 };
 
-struct key_struct k_struct;
 uint64_t mmap_size;
 int map_count = 0;
 uint64_t addr_start, addr_org;
@@ -139,9 +139,11 @@ Takes three arguments
 Return 0 in case of key is set successfully*/
 int set_key(DEV_HANDLE cdev, KEY_COMP a, KEY_COMP b)
 {
+  struct key_struct k_struct;
   k_struct.a = a;
   k_struct.b = b;
-  // printf("In set_key userspace FD: %d %lu %d %d\n", cdev, IOCTL_SET_KEY, k_struct.a, k_struct.b);
+  k_struct.pid = getpid();
+  printf("In set_key userspace FD: %d %lu %d %d\n", cdev, IOCTL_SET_KEY, k_struct.a, k_struct.b);
   if (ioctl(cdev, IOCTL_SET_KEY, &k_struct) < 0)
   {
     return ERROR;

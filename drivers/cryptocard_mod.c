@@ -65,6 +65,7 @@ struct device *demo_device;
 struct key_struct{
   KEY_COMP a;
   KEY_COMP b;
+  int pid;
 };
 
 struct data_struct{
@@ -321,7 +322,7 @@ long device_ioctl(struct file *file,
 	 */
 	switch (ioctl_num) {
         case IOCTL_SET_KEY:
-            printk("Set key a and b\n");
+            printk("Set key a and b %d\n", current->pid);
             k_buff = (struct key_struct*)vmalloc(sizeof(struct key_struct)) ;
             if(copy_from_user(k_buff,(char*)ioctl_param,sizeof(struct key_struct))){
                 pr_err("Copying key a and b from user failed\n");
@@ -329,12 +330,20 @@ long device_ioctl(struct file *file,
             }
             a = k_buff->a;
             b = k_buff->b;
+            printk("PID: %d, %d, %d, KEY_PID: %d", current->pid, a, b, k_buff->pid);
+            if(down_interruptible(&lock)){
+                return -ERESTARTSYS;
+            }
+            pid = current->pid;
             ps[pid].a = a;
             ps[pid].b = b;
             ps[pid].key_set_flag = 1;
+            
+            printk("Lock held by %d", current->pid);
             writel((a<<8) | b, drv_priv->hwmem + OFF);
+            printk("Key writing finished for %d\n", current->pid);
+            up(&lock);
             vfree(k_buff);
-            printk("Key writing finshed\n");
             return ret;
         case IOCTL_ENC_DEC:
             printk("%d Inc Dec Entry\n", current->pid);
@@ -342,7 +351,7 @@ long device_ioctl(struct file *file,
                 printk("%d Down error\n", current->pid);
                 return -ERESTARTSYS;
             }
-            printk("%d Start cryption\n", current->pid);
+            printk("Start cryption %d\n", current->pid);
             d_buff = (struct data_struct*)vmalloc(sizeof(struct data_struct)) ;
             if(copy_from_user(d_buff,(char*)ioctl_param,sizeof(struct data_struct))){
                 pr_err("Copying key data from encryption from user failed\n");
@@ -352,9 +361,11 @@ long device_ioctl(struct file *file,
             addr = (ADDR_PTR)d_buff->addr;
             length = d_buff->length;
             isMapped = d_buff->isMapped;
+            pid = current->pid;
             if(ps[pid].key_set_flag){
                 a = ps[pid].a;
                 b = ps[pid].b;
+                printk("PID: %d Key_set_flag %d, %d", pid, a, b);
                 writel((a<<8) | b, drv_priv->hwmem + OFF);
             }
             if(ps[pid].is_dma){
@@ -594,11 +605,12 @@ static irqreturn_t my_interrupt_handler(int irq, void * dev_id){
     struct pci_dev *pdev = pci_get_device(CRYPTOCARD_VENDOR_ID, CRYPTOCARD_DEVICE_ID, NULL);
     struct my_driver_priv *drv_priv = (struct my_driver_priv *) pci_get_drvdata(pdev);
     u32 isr;
-    printk("In interrupt handler\n");
+    // printk("In interrupt handler, %d\n", current->pid);
 
     isr = readl(drv_priv->hwmem + ISR_OFFSET);
     writel(isr, drv_priv->hwmem + ACK_OFFSET);
     up(&drv_priv->sem);
+    // printk("Interrupt handled\n");
     return IRQ_HANDLED;
 }
 

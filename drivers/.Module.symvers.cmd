@@ -1,1 +1,1 @@
-cmd_/home/nibir/Downloads/template-git/drivers/Module.symvers :=  sed 's/ko$$/o/'  /home/nibir/Downloads/template-git/drivers/modules.order | scripts/mod/modpost      -o /home/nibir/Downloads/template-git/drivers/Module.symvers -e -i Module.symvers -T - 
+cmd_/home/sarthak/crypto_card_driver/drivers/Module.symvers :=  sed 's/ko$$/o/'  /home/sarthak/crypto_card_driver/drivers/modules.order | scripts/mod/modpost      -o /home/sarthak/crypto_card_driver/drivers/Module.symvers -e -i Module.symvers -T - 

@@ -1,1 +1,1 @@
-cmd_/home/nibir/Downloads/template-git/drivers/modules.order := {   echo /home/nibir/Downloads/template-git/drivers/cryptocard_mod.ko; :; } > /home/nibir/Downloads/template-git/drivers/modules.order
+cmd_/home/sarthak/crypto_card_driver/drivers/modules.order := {   echo /home/sarthak/crypto_card_driver/drivers/cryptocard_mod.ko; :; } > /home/sarthak/crypto_card_driver/drivers/modules.order
