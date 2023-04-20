@@ -157,10 +157,6 @@ static int do_mmio_mapped(struct data_struct *d_buff, ADDR_PTR addr, uint64_t le
     struct my_driver_priv *drv_priv = (struct my_driver_priv *) pci_get_drvdata(pdev);
     buff = (char *)vmalloc(length);
     printk("Start MMIO mapped at user space at mapped addr %llx\n", (unsigned long long)addr);
-    for(int i = 0; i<length; i++){
-        buff[length-1-i] = readb(drv_priv->hwmem + (unsigned long long)(addr) - base_addr + i);
-    }
-    printk("Length: %lld, BAD: %lld \n", length, (unsigned long long)(addr) - base_addr);
     writel(length, drv_priv->hwmem + MMIO_MSG_LEN);
     writel((node->is_interrupt? 128 : 0) | (d_buff->is_encrypt ? 0 : 2), drv_priv->hwmem + MMIO_STATUS);
     writeq((unsigned long long)(addr) - base_addr, drv_priv->hwmem + MMIO_DATA_ADDR);
@@ -171,9 +167,6 @@ static int do_mmio_mapped(struct data_struct *d_buff, ADDR_PTR addr, uint64_t le
     }else {
         flag = 1 | (d_buff->is_encrypt ? 0 : 2);
         while(readl(drv_priv->hwmem + MMIO_STATUS) == flag);
-    }
-    for(int i = 0; i<length; i++){
-        buff[length-1-i] = readb(drv_priv->hwmem + (unsigned long long)(addr) - base_addr + i);
     }
     printk("End MMIO user space mapped\n");
     vfree(buff);
@@ -304,7 +297,6 @@ long device_ioctl(struct file *file,
     unsigned long pfn;
     unsigned long user_addr;
     struct vm_area_struct *vma;
-    pte_t *pte;
     struct proc_struct* node;
     VMA_ITERATOR(vmi, current->mm, 0);
 	/*
@@ -428,7 +420,7 @@ long device_ioctl(struct file *file,
             // Setup page permission bits
             setup_page_bits(user_addr);
             base_addr = (uint64_t)user_addr;
-            printk("User addr: %lx, %lx\n", user_addr + 168, pte->pte);
+            printk("User addr: %lx\n", user_addr + 168);
             mmap_write_unlock(current->mm);
             vfree(mp_buff);
             printk("End map card\n");
